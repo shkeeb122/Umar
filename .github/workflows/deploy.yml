@@ -1,1 +1,24 @@
+name: Auto Deploy Chatbot
 
+on:
+  schedule:
+    - cron: "0 * * * *"  # Har ghante run hoga
+  workflow_dispatch:      # Manual run bhi kar sakte ho
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run deployment script
+        run: python deploy.py
