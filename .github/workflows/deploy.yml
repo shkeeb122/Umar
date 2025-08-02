@@ -1,24 +1,28 @@
-name: Auto Deploy Chatbot
+name: Auto Deploy to Railway
 
 on:
   schedule:
-    - cron: "0 * * * *"  # Har ghante run hoga
-  workflow_dispatch:      # Manual run bhi kar sakte ho
+    - cron: "0 * * * *"  # har ghante check karega
+  workflow_dispatch:      # manually run karne ka option bhi rahega
 
 jobs:
-  deploy:
+  check-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
+      - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: '3.x'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install Dependencies
+        run: pip install requests python-dotenv
 
-      - name: Run deployment script
-        run: python deploy.py
+      - name: Run Deployment Script
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RENDER_URL: "https://your-render-url.onrender.com"
+        run: python auto_deploy.py
