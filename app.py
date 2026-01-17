@@ -8,7 +8,7 @@ CORS(app)
 
 # ================== MISTRAL CONFIG ==================
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"  # manually added
+API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"   # 🔴 Manually added as you asked
 MODEL_NAME = "mistral-small-latest"
 
 headers = {
@@ -19,20 +19,60 @@ headers = {
 # ================== TRENDING NEWS ==================
 TRENDING_API = "https://newsapi.org/v2/top-headlines?country=in&apiKey=c8034763397a4b7fbf108d5423c1cc9b"
 
-# ================== SYSTEM PROMPT ==================
+# ================== HUMAN + SMART SYSTEM PROMPT ==================
 SYSTEM_PROMPT = """
 Tum ek SMART aur INSANI MESSAGE ANALYZER ho.
-User ko bhai samajhkar baat karo.
+Tum user ko bhai samajhkar baat karte ho, robot jaise nahi.
 
-Har jawab is format me dena:
-🔴 / 🟢 / 🟡 (sirf ek)
+Sabse pehla kaam:
+👉 Message ko bahut aasaan bhasha me samjhaana
+👉 Jaise koi samajhdaar aadmi dusre aadmi ko samjhaata hai
 
-Pehle simple me samjhao,
-phir clear advice do.
-Hindi me hi jawab dena.
+FORMAT HAMESHA YEHI RAKHNA:
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔴 / 🟢 / 🟡  (sirf ek emoji choose karo)
+
+👂 BHAI, SEEDHI BAAT:
+- Pehle 2–3 line me simple samjhao
+- Ye message kyun aaya hai aur kya chahta hai
+
+📌 MESSAGE KA MATLAB (AASAAN SHABDON ME):
+- Message ka seedha meaning
+
+🧠 MESSAGE KA TYPE:
+- Fraud / Scam / Warning / Sarkari / Normal
+
+⚠️ KYUN KHATRANAQ HO SAKTA HAI (YA NAHI):
+- Agar risk hai to kyun
+- Kaun si line dangerous lag rahi hai
+
+✅ AAPKO KYA KARNA CHAHIYE:
+1. Step by step advice
+2. Practical aur safe tareeka
+
+❌ AAPKO KYA BILKUL NAHI KARNA:
+- Clear manaahi
+
+📖 MUSHKIL SHABDON KA MATLAB:
+- Agar English / technical words ho to simple Hindi me
+
+🔍 LOGIC CHECK (DIMAG LAGAKAR):
+- Kya ye baat sach me possible lagti hai?
+
+RULES:
+- Darana nahi, par clear warning dena
+- OTP, lottery, prize, urgent, block, verify aaye to alert rehna
+- Bank ya sarkar:
+  - WhatsApp/SMS se paise nahi maangti
+  - OTP kabhi nahi maangti
+- Agar message bekaar ya jhootha ho to seedha bolo
+- Hindi me hi jawab dena
+━━━━━━━━━━━━━━━━━━━━━━
 """
 
 # ================== ROUTES ==================
+
 @app.route("/")
 def home():
     return "✅ Smart Human-Style Mistral AI Backend is running."
@@ -42,21 +82,31 @@ def chat():
     user_input = request.json.get("message", "").strip()
 
     if not user_input:
-        return jsonify({"reply": "❌ Bhai, message khali hai."})
+        return jsonify({
+            "reply": "❌ Bhai, message khali hai. Pehle pura message paste karo."
+        })
 
-    # Trending news
-    if any(word in user_input.lower() for word in ["news", "trending", "khabar"]):
+    # -------- TRENDING NEWS MODE --------
+    if any(word in user_input.lower() for word in ["trending", "news", "khabar"]):
         try:
             r = requests.get(TRENDING_API, timeout=10)
             data = r.json()
-            articles = data.get("articles", [])[:5]
 
-            headlines = [f"{i+1}. {a['title']}" for i, a in enumerate(articles)]
-            return jsonify({"reply": "📰 Aaj ki khabrein:\n" + "\n".join(headlines)})
+            if "articles" in data:
+                headlines = [
+                    f"{i+1}. {a['title']}"
+                    for i, a in enumerate(data["articles"][:5])
+                ]
+                return jsonify({
+                    "reply": "📰 Bhai, aaj ki top 5 khabrein:\n\n" + "\n".join(headlines)
+                })
+            else:
+                return jsonify({"reply": "⚠️ Abhi koi khaas trending news nahi mili."})
 
         except Exception as e:
-            return jsonify({"reply": f"❌ News error: {e}"})
+            return jsonify({"reply": f"❌ News laane me problem aayi: {e}"})
 
+    # -------- AI ANALYSIS --------
     payload = {
         "model": MODEL_NAME,
         "messages": [
@@ -67,12 +117,29 @@ def chat():
     }
 
     try:
-        res = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        data = res.json()
-        return jsonify({"reply": data["choices"][0]["message"]["content"]})
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+
+        result = response.json()
+
+        if "choices" in result and result["choices"]:
+            reply = result["choices"][0]["message"]["content"]
+            return jsonify({"reply": reply})
+
+        else:
+            return jsonify({
+                "reply": "⚠️ Bhai, AI thoda confuse ho gaya. Dubara try karo."
+            })
 
     except Exception as e:
-        return jsonify({"reply": f"❌ AI error: {e}"})
+        return jsonify({
+            "reply": f"❌ Bhai, AI se baat nahi ho pa rahi: {e}"
+        })
+
 
 # ================== MAIN ==================
 if __name__ == "__main__":
