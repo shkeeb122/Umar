@@ -8,7 +8,10 @@ CORS(app)
 
 # ================== MISTRAL CONFIG ==================
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"   # 🔴 Manually added as you asked
+
+# 🔴 AAPKI MANUAL API KEY – SAME AS YOU PROVIDED
+API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"
+
 MODEL_NAME = "mistral-small-latest"
 
 headers = {
@@ -77,6 +80,14 @@ RULES:
 def home():
     return "✅ Smart Human-Style Mistral AI Backend is running."
 
+# ✅ HEALTH ROUTE (UPTIMEROBOT KE LIYE)
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok",
+        "message": "Backend is healthy and awake"
+    })
+
 @app.route("/chat", methods=["POST"])
 def chat():
     user_input = request.json.get("message", "").strip()
@@ -139,7 +150,6 @@ def chat():
         return jsonify({
             "reply": f"❌ Bhai, AI se baat nahi ho pa rahi: {e}"
         })
-
 
 # ================== MAIN ==================
 if __name__ == "__main__":
