@@ -8,10 +8,7 @@ CORS(app)
 
 # ================== MISTRAL CONFIG ==================
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-
-# 🔴 AAPKI MANUAL API KEY – SAME AS YOU PROVIDED
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"
-
+API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"  # 🔴 Manual API key
 MODEL_NAME = "mistral-small-latest"
 
 headers = {
@@ -24,31 +21,32 @@ TRENDING_API = "https://newsapi.org/v2/top-headlines?country=in&apiKey=c80347633
 
 # ================== HUMAN + SMART SYSTEM PROMPT ==================
 SYSTEM_PROMPT = """
-Tum ek SMART aur INSANI MESSAGE ANALYZER ho.
-Tum user ko bhai samajhkar baat karte ho, robot jaise nahi.
+Tum ek HIGHLY INTELLIGENT aur SMART MESSAGE ANALYZER ho.
+Tum user ko bhai samajhkar samjhao, bilkul friendly aur human-like touch ke saath.
 
-Sabse pehla kaam:
-👉 Message ko bahut aasaan bhasha me samjhaana
-👉 Jaise koi samajhdaar aadmi dusre aadmi ko samjhaata hai
+Kaam:
+- Fraud, scam, warning, normal sab ko alag karo
+- Normal messages ko confuse mat karo, sirf realistic fraud detect karo
+- Step-by-step advice do, friendly aur simple bhasha me
+- Har reply me small explanation aur logic check ho
+- Feedback ka option samjhao (user bata sake ki helpful tha ya nahi)
 
-FORMAT HAMESHA YEHI RAKHNA:
-
+FORMAT:
 ━━━━━━━━━━━━━━━━━━━━━━
-🔴 / 🟢 / 🟡  (sirf ek emoji choose karo)
+🔴 / 🟢 / 🟡  (sirf ek emoji)
 
 👂 BHAI, SEEDHI BAAT:
-- Pehle 2–3 line me simple samjhao
-- Ye message kyun aaya hai aur kya chahta hai
+- 2-3 line me simple samjhao
+- Ye message kaisa hai aur kyun aaya
 
 📌 MESSAGE KA MATLAB (AASAAN SHABDON ME):
-- Message ka seedha meaning
+- Seedha aur short meaning
 
 🧠 MESSAGE KA TYPE:
 - Fraud / Scam / Warning / Sarkari / Normal
 
 ⚠️ KYUN KHATRANAQ HO SAKTA HAI (YA NAHI):
-- Agar risk hai to kyun
-- Kaun si line dangerous lag rahi hai
+- Risk analysis + kaun line dangerous hai
 
 ✅ AAPKO KYA KARNA CHAHIYE:
 1. Step by step advice
@@ -58,64 +56,45 @@ FORMAT HAMESHA YEHI RAKHNA:
 - Clear manaahi
 
 📖 MUSHKIL SHABDON KA MATLAB:
-- Agar English / technical words ho to simple Hindi me
+- Simple explanation
 
-🔍 LOGIC CHECK (DIMAG LAGAKAR):
-- Kya ye baat sach me possible lagti hai?
+🔍 LOGIC CHECK:
+- Kya ye logically possible hai?
 
-RULES:
-- Darana nahi, par clear warning dena
-- OTP, lottery, prize, urgent, block, verify aaye to alert rehna
-- Bank ya sarkar:
-  - WhatsApp/SMS se paise nahi maangti
-  - OTP kabhi nahi maangti
-- Agar message bekaar ya jhootha ho to seedha bolo
-- Hindi me hi jawab dena
+💬 FEEDBACK SUGGESTION:
+- User ko bolne ka option "Helpful / Not helpful"
 ━━━━━━━━━━━━━━━━━━━━━━
 """
 
 # ================== ROUTES ==================
-
 @app.route("/")
 def home():
     return "✅ Smart Human-Style Mistral AI Backend is running."
 
-# ✅ HEALTH ROUTE (UPTIMEROBOT KE LIYE)
+# ✅ Health route for uptime monitor
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "status": "ok",
-        "message": "Backend is healthy and awake"
-    })
+    return jsonify({"status": "ok", "message": "Backend healthy"})
 
 @app.route("/chat", methods=["POST"])
 def chat():
     user_input = request.json.get("message", "").strip()
 
     if not user_input:
-        return jsonify({
-            "reply": "❌ Bhai, message khali hai. Pehle pura message paste karo."
-        })
+        return jsonify({"reply": "❌ Bhai, message khali hai. Pehle message paste karo."})
 
     # -------- TRENDING NEWS MODE --------
     if any(word in user_input.lower() for word in ["trending", "news", "khabar"]):
         try:
             r = requests.get(TRENDING_API, timeout=10)
             data = r.json()
-
             if "articles" in data:
-                headlines = [
-                    f"{i+1}. {a['title']}"
-                    for i, a in enumerate(data["articles"][:5])
-                ]
-                return jsonify({
-                    "reply": "📰 Bhai, aaj ki top 5 khabrein:\n\n" + "\n".join(headlines)
-                })
+                headlines = [f"{i+1}. {a['title']}" for i, a in enumerate(data["articles"][:5])]
+                return jsonify({"reply": "📰 Top 5 news:\n" + "\n".join(headlines)})
             else:
-                return jsonify({"reply": "⚠️ Abhi koi khaas trending news nahi mili."})
-
+                return jsonify({"reply": "⚠️ Abhi koi trending news nahi mili."})
         except Exception as e:
-            return jsonify({"reply": f"❌ News laane me problem aayi: {e}"})
+            return jsonify({"reply": f"❌ News fetch error: {e}"})
 
     # -------- AI ANALYSIS --------
     payload = {
@@ -124,32 +103,24 @@ def chat():
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_input}
         ],
-        "temperature": 0.25
+        "temperature": 0.3
     }
 
     try:
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         result = response.json()
-
         if "choices" in result and result["choices"]:
             reply = result["choices"][0]["message"]["content"]
-            return jsonify({"reply": reply})
 
+            # ---------- FEEDBACK PLACEHOLDER ----------
+            reply += "\n\n💡 Agar helpful laga toh 'Helpful', nahi laga toh 'Not helpful' bhejo."
+
+            return jsonify({"reply": reply})
         else:
-            return jsonify({
-                "reply": "⚠️ Bhai, AI thoda confuse ho gaya. Dubara try karo."
-            })
+            return jsonify({"reply": "⚠️ Bhai, AI confuse ho gaya. Dubara try karo."})
 
     except Exception as e:
-        return jsonify({
-            "reply": f"❌ Bhai, AI se baat nahi ho pa rahi: {e}"
-        })
+        return jsonify({"reply": f"❌ AI error: {e}"})
 
 # ================== MAIN ==================
 if __name__ == "__main__":
