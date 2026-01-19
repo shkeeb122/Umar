@@ -9,7 +9,10 @@ CORS(app)
 
 # ================== MISTRAL CONFIG ==================
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"   # ✅ AAPKI API KEY
+
+# ✅ AAPKI API KEY DIRECT ADD KI GAYI HAI
+API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"
+
 MODEL_NAME = "mistral-small-latest"
 
 headers = {
@@ -17,93 +20,139 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# ================== HUMAN + SMART SYSTEM PROMPT ==================
+# ================== FRAUD WORDS WITH WEIGHT ==================
+FRAUD_WORDS = {
+    "lottery": 5,
+    "winner": 5,
+    "prize": 4,
+    "free money": 6,
+    "claim now": 6,
+    "urgent": 4,
+    "account blocked": 7,
+    "account suspended": 7,
+    "verify now": 5,
+    "kyc update": 4,
+    "refund pending": 4,
+    "click link": 8,
+    "limited time": 4,
+    "customs": 4,
+    "parcel": 3,
+    "gift received": 5,
+    "crypto profit": 7,
+    "investment guaranteed": 8,
+    "double money": 9,
+    "telegram": 4,
+    "whatsapp support": 4,
+    "loan approved instantly": 6,
+    "pre-approved loan": 4
+}
+
+# ================== SAFE WORDS (NEGATIVE SCORE) ==================
+SAFE_WORDS = {
+    "otp for login": -4,
+    "otp for transaction": -4,
+    "do not share otp": -6,
+    "credited": -3,
+    "debited": -3,
+    "transaction successful": -4,
+    "available balance": -3,
+    "bill generated": -2,
+    "appointment confirmation": -2,
+    "delivery update": -2,
+    "payment received": -3
+}
+
+# ================== EXTRA PATTERNS ==================
+LINK_PATTERN = r"(http|https|www\.|bit\.ly|tinyurl)"
+OTP_ASK_PATTERN = r"(share otp|send otp|tell otp|otp bhejo)"
+URGENCY_PATTERN = r"(urgent|turant|abhi|warna|last chance|24 hour)"
+
+# ================== SYSTEM PROMPT ==================
 SYSTEM_PROMPT = """
-Tum ek SMART, SAMAJHDAR aur INSANI MESSAGE ANALYZER ho.
+Tum ek SMART, HUMAN-TYPE MESSAGE ANALYZER ho.
 
-SOCHNE KA TAREEKA (VERY IMPORTANT):
-- Har message fraud nahi hota
-- Pehle samjho → phir decide karo
-- "Agar aapne ye kaam kiya hai to sahi, nahi kiya to risk" ye logic hamesha use karo
-- OTP aana normal ho sakta hai, OTP maangna fraud hota hai
-- Bank / Aadhaar kabhi SMS me link dekar detail nahi maangte
+RULES:
+- Har OTP fraud nahi hota
+- OTP MAANGNA fraud hota hai
+- Government / Bank alerts aksar safe hote hain
+- Darana nahi, samjhana hai
+- Clear aur balanced jawab do
 
-TUMHARA GOAL:
-User ko aisa lage jaise koi samajhdar aadmi use baithkar samjha raha ho
-
-FORMAT (STRICT):
+FORMAT FOLLOW KARO:
 ━━━━━━━━━━━━━━━━━━━━━━
-🔴 / 🟢 / 🟡  (sirf ek)
+🔴 / 🟢 / 🟡
 
 👂 BHAI, SEEDHI BAAT:
-2–3 line me bilkul simple me samjhao
+2–3 line simple explanation
 
-📌 MESSAGE KA MATLAB (AASAAN BHASHA ME):
-Seedha matlab, translate jaise nahi, samjha kar
+📌 MESSAGE KA MATLAB:
 
 🧠 MESSAGE KA TYPE:
-Fraud / Scam / Warning / Sarkari / Normal
+Fraud / Warning / Normal / Sarkari
 
-🤔 AGAR AAPNE YE KAAM KIYA HAI:
-- Tab kya matlab hai
+🤔 AGAR AAPNE YE KIYA HAI:
 
-⚠️ AGAR AAPNE YE KAAM NAHI KIYA:
-- Tab kya risk ho sakta hai
+⚠️ AGAR AAPNE NAHI KIYA:
 
 ✅ AAPKO KYA KARNA CHAHIYE:
-Step by step safe advice
 
-❌ AAPKO KYA BILKUL NAHI KARNA:
-Clear manaahi
-
-📖 MUSHKIL SHABDON KA MATLAB:
-Simple Hindi me
+❌ AAPKO KYA NAHI KARNA:
 
 🔍 LOGIC CHECK:
-Ye baat sach me possible lagti hai ya nahi
-━━━━━━━━━━━━━━━━━━━━━━
 """
 
-# ================== HELPER: QUICK SAFE CHECK ==================
-def looks_like_normal_alert(text):
-    """
-    Ye function false fraud kam karega
-    """
-    patterns = [
-        r"credited to your account",
-        r"debited from your account",
-        r"is your otp",
-        r"otp for",
-        r"available balance",
-        r"transaction successful"
-    ]
+# ================== SCORE CALCULATOR ==================
+def calculate_risk_score(text):
     text = text.lower()
-    return any(re.search(p, text) for p in patterns)
+    score = 0
+
+    for word, weight in FRAUD_WORDS.items():
+        if word in text:
+            score += weight
+
+    for word, weight in SAFE_WORDS.items():
+        if word in text:
+            score += weight
+
+    if re.search(LINK_PATTERN, text):
+        score += 6
+
+    if re.search(OTP_ASK_PATTERN, text):
+        score += 8
+
+    if re.search(URGENCY_PATTERN, text):
+        score += 4
+
+    return score
+
+def classify_message(score):
+    if score >= 10:
+        return "FRAUD"
+    elif score >= 5:
+        return "WARNING"
+    else:
+        return "SAFE"
 
 # ================== ROUTES ==================
 @app.route("/")
 def home():
-    return "✅ Smart Human-Style Fraud Analyzer Running"
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "message": "Backend healthy"})
+    return "✅ Advanced Smart Fraud Analyzer Running"
 
 @app.route("/chat", methods=["POST"])
 def chat():
     user_input = request.json.get("message", "").strip()
-
     if not user_input:
-        return jsonify({"reply": "❌ Bhai, message khali hai. Pehle message paste karo."})
+        return jsonify({"reply": "❌ Message khali hai."})
 
-    # 🧠 PRE-CHECK (Normal looking messages)
-    if looks_like_normal_alert(user_input):
-        hint = (
-            "NOTE FOR AI: Ye message normal bank/OTP alert jaisa lag raha hai. "
-            "Isko tabhi fraud bolo jab koi clear danger (link, threat, OTP maangna) ho."
-        )
+    score = calculate_risk_score(user_input)
+    category = classify_message(score)
+
+    if category == "SAFE":
+        hint = "NOTE: Ye message normal ya system alert lag raha hai. Fraud declare mat karo."
+    elif category == "WARNING":
+        hint = "NOTE: Is message me thoda risk hai. Balanced warning do."
     else:
-        hint = ""
+        hint = "NOTE: Is message me clear fraud signs hain. Strong warning do."
 
     payload = {
         "model": MODEL_NAME,
@@ -112,24 +161,21 @@ def chat():
             {"role": "system", "content": hint},
             {"role": "user", "content": user_input}
         ],
-        "temperature": 0.2
+        "temperature": 0.15
     }
 
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        result = response.json()
-
-        if "choices" in result and result["choices"]:
-            reply = result["choices"][0]["message"]["content"]
-            return jsonify({"reply": reply})
-        else:
-            return jsonify({"reply": "⚠️ Bhai, AI thoda confuse ho gaya. Dubara try karo."})
-
+        r = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        data = r.json()
+        reply = data["choices"][0]["message"]["content"]
+        return jsonify({
+            "risk_score": score,
+            "category": category,
+            "reply": reply
+        })
     except Exception as e:
-        return jsonify({"reply": f"❌ Server error: {e}"})
+        return jsonify({"reply": f"❌ Error: {e}"})
 
-
-# ================== MAIN ==================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
