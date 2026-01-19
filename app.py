@@ -2,13 +2,14 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import os
+import re
 
 app = Flask(__name__)
 CORS(app)
 
 # ================== MISTRAL CONFIG ==================
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"  # 🔴 Manual API key
+API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK6o"   # ✅ AAPKI API KEY
 MODEL_NAME = "mistral-small-latest"
 
 headers = {
@@ -16,62 +17,74 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# ================== TRENDING NEWS ==================
-TRENDING_API = "https://newsapi.org/v2/top-headlines?country=in&apiKey=c8034763397a4b7fbf108d5423c1cc9b"
-
 # ================== HUMAN + SMART SYSTEM PROMPT ==================
 SYSTEM_PROMPT = """
-Tum ek HIGHLY INTELLIGENT aur SMART MESSAGE ANALYZER ho.
-Tum user ko bhai samajhkar samjhao, bilkul friendly aur human-like touch ke saath.
+Tum ek SMART, SAMAJHDAR aur INSANI MESSAGE ANALYZER ho.
 
-Kaam:
-- Fraud, scam, warning, normal sab ko alag karo
-- Normal messages ko confuse mat karo, sirf realistic fraud detect karo
-- Step-by-step advice do, friendly aur simple bhasha me
-- Har reply me small explanation aur logic check ho
-- Feedback ka option samjhao (user bata sake ki helpful tha ya nahi)
+SOCHNE KA TAREEKA (VERY IMPORTANT):
+- Har message fraud nahi hota
+- Pehle samjho → phir decide karo
+- "Agar aapne ye kaam kiya hai to sahi, nahi kiya to risk" ye logic hamesha use karo
+- OTP aana normal ho sakta hai, OTP maangna fraud hota hai
+- Bank / Aadhaar kabhi SMS me link dekar detail nahi maangte
 
-FORMAT:
+TUMHARA GOAL:
+User ko aisa lage jaise koi samajhdar aadmi use baithkar samjha raha ho
+
+FORMAT (STRICT):
 ━━━━━━━━━━━━━━━━━━━━━━
-🔴 / 🟢 / 🟡  (sirf ek emoji)
+🔴 / 🟢 / 🟡  (sirf ek)
 
 👂 BHAI, SEEDHI BAAT:
-- 2-3 line me simple samjhao
-- Ye message kaisa hai aur kyun aaya
+2–3 line me bilkul simple me samjhao
 
-📌 MESSAGE KA MATLAB (AASAAN SHABDON ME):
-- Seedha aur short meaning
+📌 MESSAGE KA MATLAB (AASAAN BHASHA ME):
+Seedha matlab, translate jaise nahi, samjha kar
 
 🧠 MESSAGE KA TYPE:
-- Fraud / Scam / Warning / Sarkari / Normal
+Fraud / Scam / Warning / Sarkari / Normal
 
-⚠️ KYUN KHATRANAQ HO SAKTA HAI (YA NAHI):
-- Risk analysis + kaun line dangerous hai
+🤔 AGAR AAPNE YE KAAM KIYA HAI:
+- Tab kya matlab hai
+
+⚠️ AGAR AAPNE YE KAAM NAHI KIYA:
+- Tab kya risk ho sakta hai
 
 ✅ AAPKO KYA KARNA CHAHIYE:
-1. Step by step advice
-2. Practical aur safe tareeka
+Step by step safe advice
 
 ❌ AAPKO KYA BILKUL NAHI KARNA:
-- Clear manaahi
+Clear manaahi
 
 📖 MUSHKIL SHABDON KA MATLAB:
-- Simple explanation
+Simple Hindi me
 
 🔍 LOGIC CHECK:
-- Kya ye logically possible hai?
-
-💬 FEEDBACK SUGGESTION:
-- User ko bolne ka option "Helpful / Not helpful"
+Ye baat sach me possible lagti hai ya nahi
 ━━━━━━━━━━━━━━━━━━━━━━
 """
+
+# ================== HELPER: QUICK SAFE CHECK ==================
+def looks_like_normal_alert(text):
+    """
+    Ye function false fraud kam karega
+    """
+    patterns = [
+        r"credited to your account",
+        r"debited from your account",
+        r"is your otp",
+        r"otp for",
+        r"available balance",
+        r"transaction successful"
+    ]
+    text = text.lower()
+    return any(re.search(p, text) for p in patterns)
 
 # ================== ROUTES ==================
 @app.route("/")
 def home():
-    return "✅ Smart Human-Style Mistral AI Backend is running."
+    return "✅ Smart Human-Style Fraud Analyzer Running"
 
-# ✅ Health route for uptime monitor
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "message": "Backend healthy"})
@@ -83,44 +96,38 @@ def chat():
     if not user_input:
         return jsonify({"reply": "❌ Bhai, message khali hai. Pehle message paste karo."})
 
-    # -------- TRENDING NEWS MODE --------
-    if any(word in user_input.lower() for word in ["trending", "news", "khabar"]):
-        try:
-            r = requests.get(TRENDING_API, timeout=10)
-            data = r.json()
-            if "articles" in data:
-                headlines = [f"{i+1}. {a['title']}" for i, a in enumerate(data["articles"][:5])]
-                return jsonify({"reply": "📰 Top 5 news:\n" + "\n".join(headlines)})
-            else:
-                return jsonify({"reply": "⚠️ Abhi koi trending news nahi mili."})
-        except Exception as e:
-            return jsonify({"reply": f"❌ News fetch error: {e}"})
+    # 🧠 PRE-CHECK (Normal looking messages)
+    if looks_like_normal_alert(user_input):
+        hint = (
+            "NOTE FOR AI: Ye message normal bank/OTP alert jaisa lag raha hai. "
+            "Isko tabhi fraud bolo jab koi clear danger (link, threat, OTP maangna) ho."
+        )
+    else:
+        hint = ""
 
-    # -------- AI ANALYSIS --------
     payload = {
         "model": MODEL_NAME,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": hint},
             {"role": "user", "content": user_input}
         ],
-        "temperature": 0.3
+        "temperature": 0.2
     }
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         result = response.json()
+
         if "choices" in result and result["choices"]:
             reply = result["choices"][0]["message"]["content"]
-
-            # ---------- FEEDBACK PLACEHOLDER ----------
-            reply += "\n\n💡 Agar helpful laga toh 'Helpful', nahi laga toh 'Not helpful' bhejo."
-
             return jsonify({"reply": reply})
         else:
-            return jsonify({"reply": "⚠️ Bhai, AI confuse ho gaya. Dubara try karo."})
+            return jsonify({"reply": "⚠️ Bhai, AI thoda confuse ho gaya. Dubara try karo."})
 
     except Exception as e:
-        return jsonify({"reply": f"❌ AI error: {e}"})
+        return jsonify({"reply": f"❌ Server error: {e}"})
+
 
 # ================== MAIN ==================
 if __name__ == "__main__":
