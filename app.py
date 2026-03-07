@@ -12,7 +12,7 @@ app = Flask(__name__)
 # ===============================
 API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"
 API_URL = "https://api.mistral.ai/v1/chat/completions"
-MODEL_NAME = "mistral-small"
+MODEL_NAME = "mistral-small-latest"
 
 headers = {
     "Authorization": f"Bearer {API_KEY}",
