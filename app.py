@@ -8,258 +8,204 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# ===============================
-# MISTRAL AI CONFIG
-# ===============================
-API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"
-API_URL = "https://api.mistral.ai/v1/chat/completions"
+# ========================
+# MISTRAL API CONFIG
+# ========================
+MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"  # direct add kiya
+MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
 
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
+HEADERS = {
+    "Authorization": f"Bearer {MISTRAL_API_KEY}",
     "Content-Type": "application/json"
 }
 
-# ===============================
+# ========================
 # WORDPRESS CONFIG
-# ===============================
+# ========================
 WP_SITE = "https://yourblog.wordpress.com"
 WP_URL = f"{WP_SITE}/wp-json/wp/v2/posts"
-
 WP_USERNAME = "yourusername"
-WP_APP_PASSWORD = "7dsw xnv5 fota png2"
+WP_APP_PASSWORD = "7dswxnv5fotapng2"  # spaces removed
 
-auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
-auth_bytes = auth_str.encode("utf-8")
-auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
+auth_string = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
+auth_base64 = base64.b64encode(auth_string.encode()).decode()
 
 WP_HEADERS = {
-    "Authorization": f"Basic {auth_b64}",
+    "Authorization": f"Basic {auth_base64}",
     "Content-Type": "application/json"
 }
 
-# ===============================
-# SQLITE MEMORY CONFIG
-# ===============================
+# ========================
+# SQLITE DATABASE
+# ========================
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS campaigns (
-    id TEXT PRIMARY KEY,
-    niche TEXT,
-    keywords TEXT,
-    products TEXT,
-    content TEXT,
-    blog_url TEXT,
-    status TEXT,
-    created_at TEXT
+CREATE TABLE IF NOT EXISTS campaigns(
+id TEXT PRIMARY KEY,
+niche TEXT,
+keywords TEXT,
+products TEXT,
+content TEXT,
+blog_url TEXT,
+status TEXT,
+created_at TEXT
 )
 """)
 conn.commit()
 
-# ===============================
-# MEMORY FUNCTIONS
-# ===============================
+# ========================
+# DATABASE MEMORY
+# ========================
 def add_campaign_sql(niche, keywords, products, content, blog_url):
-
-    campaign_id = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
-
-    cursor.execute("""
+    try:
+        campaign_id = str(uuid.uuid4())
+        created_at = datetime.utcnow().isoformat()
+        cursor.execute("""
         INSERT INTO campaigns
-        (id, niche, keywords, products, content, blog_url, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        campaign_id,
-        niche,
-        ",".join(keywords),
-        ",".join([p["name"] for p in products]),
-        content,
-        blog_url,
-        "published",
-        created_at
-    ))
+        VALUES(?,?,?,?,?,?,?,?)
+        """,(
+            campaign_id,
+            niche,
+            ",".join(keywords),
+            ",".join([p["name"] for p in products]),
+            content,
+            blog_url,
+            "published",
+            created_at
+        ))
+        conn.commit()
+        return campaign_id
+    except Exception as e:
+        return f"Database error: {str(e)}"
 
-    conn.commit()
+# ========================
+# SYSTEM CHECK
+# ========================
+@app.route("/system-check")
+def system_check():
+    report = {}
 
-    return campaign_id
+    # Mistral API
+    try:
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json={"model": MODEL_NAME, "messages":[{"role":"user","content":"test"}]})
+        report["ai_api"] = "OK" if r.status_code == 200 else f"Error: {r.status_code}"
+    except Exception as e:
+        report["ai_api"] = f"Error: {str(e)}"
 
+    # WordPress
+    try:
+        r = requests.get(WP_SITE)
+        report["wordpress"] = "OK" if r.status_code==200 else f"Error: {r.status_code}"
+    except Exception as e:
+        report["wordpress"] = f"Error: {str(e)}"
 
-# ===============================
+    # Database
+    try:
+        cursor.execute("SELECT COUNT(*) FROM campaigns")
+        report["database"] = "OK"
+    except Exception as e:
+        report["database"] = f"Error: {str(e)}"
+
+    return jsonify(report)
+
+# ========================
 # BASIC ROUTE
-# ===============================
+# ========================
 @app.route("/")
 def home():
-    return jsonify({"status": "AI Marketing + WordPress Automation Running"})
+    return jsonify({"status":"AI Marketing System Running"})
 
-
-# ===============================
+# ========================
 # COMMAND ROUTE
-# ===============================
+# ========================
 @app.route("/command", methods=["POST"])
 def command_route():
-
     data = request.json
     command = data.get("command")
+    if not command:
+        return jsonify({"status":"error","message":"No command provided"})
 
     plan = ai_planner(command)
     result = marketing_agent(plan)
+    return jsonify({"status":"success","command":command,"plan":plan,"result":result})
 
-    return jsonify({
-        "command": command,
-        "plan": plan,
-        "result": result
-    })
-
-
-# ===============================
+# ========================
 # AI PLANNER
-# ===============================
+# ========================
 def ai_planner(command):
+    prompt = f"User command: {command}\nCreate marketing plan."
+    payload = {"model":MODEL_NAME,"messages":[{"role":"user","content":prompt}],"temperature":0.2}
+    try:
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=20)
+        data = r.json()
+        content = data.get("choices",[{}])[0].get("message",{}).get("content","AI returned nothing")
+        return content
+    except Exception as e:
+        return f"AI planner error: {str(e)}"
 
-    prompt = f"""
-User command: {command}
-
-Create marketing automation plan:
-1 niche research
-2 keyword research
-3 product research
-4 content plan
-5 blog publishing
-"""
-
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": "You are marketing planner."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2
-    }
-
-    r = requests.post(API_URL, headers=headers, json=payload)
-
-    return r.json()["choices"][0]["message"]["content"]
-
-
-# ===============================
-# RESEARCH TOOLS
-# ===============================
+# ========================
+# TOOLS
+# ========================
 def niche_research_tool():
-
-    niches = [
-        "AI software",
-        "fitness products",
-        "weight loss products",
-        "web hosting",
-        "online courses"
-    ]
-
-    return niches
-
+    return ["AI software","fitness products","weight loss products","web hosting","online courses"]
 
 def keyword_tool(niche):
-
-    keywords = [
-        f"best {niche}",
-        f"{niche} review",
-        f"cheap {niche}",
-        f"top {niche} 2026",
-        f"buy {niche} online"
-    ]
-
-    return keywords
-
+    return [f"best {niche}",f"{niche} review",f"cheap {niche}",f"top {niche} 2026",f"buy {niche} online"]
 
 def product_tool(niche):
+    return [{"name":f"{niche} Pro Tool","commission":"40%"},{"name":f"{niche} Premium Kit","commission":"30%"},{"name":f"{niche} Starter Pack","commission":"25%"}]
 
-    products = [
-        {"name": f"{niche} Pro Tool", "commission": "40%"},
-        {"name": f"{niche} Premium Kit", "commission": "30%"},
-        {"name": f"{niche} Starter Pack", "commission": "25%"}
-    ]
-
-    return products
-
-
-# ===============================
-# CONTENT GENERATOR
-# ===============================
+# ========================
+# CONTENT TOOL
+# ========================
 def content_tool(keyword):
+    payload = {"model":MODEL_NAME,"messages":[{"role":"user","content":f"Write SEO article for: {keyword}"}],"temperature":0.7}
+    try:
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=20)
+        data = r.json()
+        content = data.get("choices",[{}])[0].get("message",{}).get("content","AI returned nothing")
+        return content
+    except Exception as e:
+        return f"Content generation error: {str(e)}"
 
-    prompt = f"Write SEO blog article for keyword: {keyword}"
-
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7
-    }
-
-    r = requests.post(API_URL, headers=headers, json=payload)
-
-    return r.json()["choices"][0]["message"]["content"]
-
-
-# ===============================
+# ========================
 # WORDPRESS PUBLISH
-# ===============================
+# ========================
 def publish_to_wordpress(title, content):
+    try:
+        data = {"title":title,"content":content,"status":"publish"}
+        r = requests.post(WP_URL, headers=WP_HEADERS, json=data, timeout=20)
+        if r.status_code == 201:
+            return r.json().get("link","Published but no link")
+        return f"WordPress error: {r.status_code} {r.text}"
+    except Exception as e:
+        return f"WordPress publish error: {str(e)}"
 
-    data = {
-        "title": title,
-        "content": content,
-        "status": "publish"
-    }
-
-    r = requests.post(WP_URL, headers=WP_HEADERS, json=data)
-
-    if r.status_code == 201:
-        return r.json()["link"]
-    else:
-        return f"WordPress error: {r.text}"
-
-
-# ===============================
+# ========================
 # MARKETING AGENT
-# ===============================
+# ========================
 def marketing_agent(plan):
-
-    niches = niche_research_tool()
-
-    selected_niche = niches[0]
-
-    keywords = keyword_tool(selected_niche)
-
-    products = product_tool(selected_niche)
-
+    niche = niche_research_tool()[0]
+    keywords = keyword_tool(niche)
+    products = product_tool(niche)
     content = content_tool(keywords[0])
+    blog_url = publish_to_wordpress(f"{niche} Guide", content)
+    add_campaign_sql(niche, keywords, products, content, blog_url)
+    return {"niche":niche,"keywords":keywords,"products":products,"blog_url":blog_url}
 
-    blog_url = publish_to_wordpress(
-        f"{selected_niche} Guide",
-        content
-    )
+# ========================
+# CAMPAIGN HISTORY
+# ========================
+@app.route("/campaigns")
+def get_campaigns():
+    cursor.execute("SELECT * FROM campaigns")
+    return jsonify(cursor.fetchall())
 
-    add_campaign_sql(
-        selected_niche,
-        keywords,
-        products,
-        content,
-        blog_url
-    )
-
-    return {
-        "niche": selected_niche,
-        "keywords": keywords,
-        "products": products,
-        "blog_url": blog_url
-    }
-
-
-# ===============================
+# ========================
 # SERVER
-# ===============================
+# ========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
