@@ -1,11 +1,13 @@
-    import os
+import os
 import requests
 import sqlite3
 import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS  # CORS import
 
 app = Flask(__name__)
+CORS(app)  # ✅ Enable frontend cross-origin requests
 
 # ========================
 # MISTRAL API CONFIG
@@ -18,6 +20,11 @@ HEADERS = {
     "Authorization": f"Bearer {MISTRAL_API_KEY}",
     "Content-Type": "application/json"
 }
+
+# ========================
+# DEPLOYED BACKEND URL
+# ========================
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:5000")
 
 # ========================
 # SQLITE DATABASE
@@ -54,10 +61,8 @@ conn.commit()
 # DATABASE SAVE
 # ========================
 def add_campaign_sql(niche, keywords, products, content, blog_url):
-
     campaign_id = str(uuid.uuid4())
     created_at = datetime.utcnow().isoformat()
-
     cursor.execute("""
     INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)
     """,(
@@ -70,28 +75,21 @@ def add_campaign_sql(niche, keywords, products, content, blog_url):
         "published",
         created_at
     ))
-
     conn.commit()
-
     return {"status":"success"}
 
 # ========================
 # LOCAL BLOG PUBLISH
 # ========================
 def publish_local_blog(title, content):
-
     slug = str(uuid.uuid4())[:8]
     post_id = str(uuid.uuid4())
     created_at = datetime.utcnow().isoformat()
-
     cursor.execute("""
     INSERT INTO posts VALUES (?,?,?,?,?)
     """,(post_id,title,content,slug,created_at))
-
     conn.commit()
-
-    blog_url = f"http://localhost:5000/blog/{slug}"
-
+    blog_url = f"{BACKEND_URL}/blog/{slug}"  # ✅ Deployed URL
     return {
         "status":"success",
         "blog_url": blog_url
@@ -102,33 +100,22 @@ def publish_local_blog(title, content):
 # ========================
 @app.route("/blog/<slug>")
 def view_blog(slug):
-
     cursor.execute("SELECT title,content,created_at FROM posts WHERE slug=?",(slug,))
     post = cursor.fetchone()
-
     if not post:
         return "Blog not found"
-
     title,content,created = post
-
     html = f"""
     <html>
-    <head>
-    <title>{title}</title>
-    </head>
-
+    <head><title>{title}</title></head>
     <body style="font-family:Arial;max-width:800px;margin:auto">
-
     <h1>{title}</h1>
     <p><i>{created}</i></p>
     <hr>
-
     <div>{content}</div>
-
     </body>
     </html>
     """
-
     return render_template_string(html)
 
 # ========================
@@ -136,29 +123,22 @@ def view_blog(slug):
 # ========================
 @app.route("/system-check")
 def system_check():
-
     report = {}
-
     try:
         r = requests.post(
             MISTRAL_URL,
             headers=HEADERS,
             json={"model":MODEL_NAME,"messages":[{"role":"user","content":"test"}]},
-            timeout=20
+            timeout=30
         )
-
         report["ai_api"] = {"status":"OK"} if r.status_code==200 else {"status":"error"}
-
     except Exception as e:
-
         report["ai_api"] = {"status":"error","message":str(e)}
-
     try:
         cursor.execute("SELECT COUNT(*) FROM campaigns")
         report["database"] = {"status":"OK"}
     except Exception as e:
         report["database"] = {"status":"error","message":str(e)}
-
     return jsonify(report)
 
 # ========================
@@ -173,108 +153,75 @@ def home():
 # ========================
 @app.route("/command", methods=["POST"])
 def command_route():
-
     data = request.json
     command = data.get("command")
-
     if not command:
         return jsonify({"status":"error","message":"No command provided"})
 
-    final_result = {}
-
-    plan_result = ai_planner(command)
-    final_result["ai_planner"] = plan_result
-
-    marketing_result = marketing_agent(plan_result.get("plan",""))
-
-    final_result.update(marketing_result)
-
-    return jsonify(final_result)
+    try:
+        final_result = {}
+        plan_result = ai_planner(command)
+        final_result["ai_planner"] = plan_result
+        marketing_result = marketing_agent(plan_result.get("plan",""))
+        final_result.update(marketing_result)
+        return jsonify(final_result)  # ✅ Frontend compatible
+    except Exception as e:
+        return jsonify({"status":"error","message":str(e)})
 
 # ========================
 # AI PLANNER
 # ========================
 def ai_planner(command):
-
     prompt = f"User command: {command}\nCreate marketing plan."
-
-    payload = {
-        "model":MODEL_NAME,
-        "messages":[{"role":"user","content":prompt}],
-        "temperature":0.2
-    }
-
-    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload)
-    data = r.json()
-    content = data.get("choices",[{}])[0].get("message",{}).get("content","")
-    return {"status":"success","plan":content}
+    payload = {"model":MODEL_NAME,"messages":[{"role":"user","content":prompt}],"temperature":0.2}
+    try:
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        content = data.get("choices",[{}])[0].get("message",{}).get("content","")
+        return {"status":"success","plan":content}
+    except Exception as e:
+        return {"status":"error","plan":"","message":str(e)}
 
 # ========================
-# NICHE TOOL
+# NICHE / KEYWORD / PRODUCT / CONTENT TOOLS
 # ========================
 def niche_research_tool():
     return ["AI software","fitness products","weight loss products","web hosting","online courses"]
 
-# ========================
-# KEYWORD TOOL
-# ========================
 def keyword_tool(niche):
     return [f"best {niche}",f"{niche} review",f"cheap {niche}",f"top {niche} 2026"]
 
-# ========================
-# PRODUCT TOOL
-# ========================
 def product_tool(niche):
-    return [
-        {"name":f"{niche} Pro Tool","commission":"40%"},
-        {"name":f"{niche} Premium Kit","commission":"30%"}
-    ]
+    return [{"name":f"{niche} Pro Tool","commission":"40%"},{"name":f"{niche} Premium Kit","commission":"30%"}]
 
-# ========================
-# CONTENT TOOL
-# ========================
 def content_tool(keyword):
-
-    payload = {
-        "model":MODEL_NAME,
-        "messages":[{"role":"user","content":f"Write SEO article for: {keyword}"}],
-        "temperature":0.7
-    }
-
-    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload)
-    data = r.json()
-    content = data.get("choices",[{}])[0].get("message",{}).get("content","")
-    return {"status":"success","content":content}
+    payload = {"model":MODEL_NAME,"messages":[{"role":"user","content":f"Write SEO article for: {keyword}"}],"temperature":0.7}
+    try:
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        content = data.get("choices",[{}])[0].get("message",{}).get("content","")
+        return {"status":"success","content":content}
+    except Exception as e:
+        return {"status":"error","content":""}
 
 # ========================
 # MARKETING AGENT
 # ========================
 def marketing_agent(plan):
-
-    result = {}
-
     niche = niche_research_tool()[0]
     keywords = keyword_tool(niche)
     products = product_tool(niche)
-
     content_res = content_tool(keywords[0])
-    publish_res = publish_local_blog(f"{niche} Guide",content_res.get("content",""))
-
-    add_campaign_sql(
-        niche,
-        keywords,
-        products,
-        content_res.get("content",""),
-        publish_res.get("blog_url","")
-    )
-
-    # ✅ Add all values for frontend compatibility
-    result["blog_url"] = publish_res.get("blog_url","")
-    result["niche"] = niche
-    result["keywords"] = keywords
-    result["products"] = products
-
-    return result
+    publish_res = publish_local_blog(f"{niche} Guide", content_res.get("content",""))
+    add_campaign_sql(niche, keywords, products, content_res.get("content",""), publish_res.get("blog_url",""))
+    return {
+        "niche": niche,
+        "keywords": keywords,
+        "products": products,
+        "blog_url": publish_res.get("blog_url","")
+    }
 
 # ========================
 # CAMPAIGN HISTORY
@@ -288,4 +235,4 @@ def campaigns():
 # SERVER START
 # ========================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=False)
