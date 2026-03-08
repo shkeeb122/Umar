@@ -4,10 +4,10 @@ import sqlite3
 import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS  # CORS import
+from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # ✅ Enable frontend cross-origin requests
+CORS(app)  # Enable frontend cross-origin requests
 
 # ========================
 # MISTRAL API CONFIG
@@ -15,7 +15,6 @@ CORS(app)  # ✅ Enable frontend cross-origin requests
 MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
-
 HEADERS = {
     "Authorization": f"Bearer {MISTRAL_API_KEY}",
     "Content-Type": "application/json"
@@ -44,7 +43,6 @@ status TEXT,
 created_at TEXT
 )
 """)
-
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS posts(
 id TEXT PRIMARY KEY,
@@ -54,7 +52,6 @@ slug TEXT,
 created_at TEXT
 )
 """)
-
 conn.commit()
 
 # ========================
@@ -89,11 +86,8 @@ def publish_local_blog(title, content):
     INSERT INTO posts VALUES (?,?,?,?,?)
     """,(post_id,title,content,slug,created_at))
     conn.commit()
-    blog_url = f"{BACKEND_URL}/blog/{slug}"  # ✅ Deployed URL
-    return {
-        "status":"success",
-        "blog_url": blog_url
-    }
+    blog_url = f"{BACKEND_URL}/blog/{slug}"
+    return {"status":"success", "blog_url": blog_url}
 
 # ========================
 # BLOG VIEW
@@ -102,8 +96,7 @@ def publish_local_blog(title, content):
 def view_blog(slug):
     cursor.execute("SELECT title,content,created_at FROM posts WHERE slug=?",(slug,))
     post = cursor.fetchone()
-    if not post:
-        return "Blog not found"
+    if not post: return "Blog not found"
     title,content,created = post
     html = f"""
     <html>
@@ -155,16 +148,11 @@ def home():
 def command_route():
     data = request.json
     command = data.get("command")
-    if not command:
-        return jsonify({"status":"error","message":"No command provided"})
-
+    if not command: return jsonify({"status":"error","message":"No command provided"})
     try:
-        final_result = {}
         plan_result = ai_planner(command)
-        final_result["ai_planner"] = plan_result
         marketing_result = marketing_agent(plan_result.get("plan",""))
-        final_result.update(marketing_result)
-        return jsonify(final_result)  # ✅ Frontend compatible
+        return jsonify(marketing_result)
     except Exception as e:
         return jsonify({"status":"error","message":str(e)})
 
@@ -216,12 +204,7 @@ def marketing_agent(plan):
     content_res = content_tool(keywords[0])
     publish_res = publish_local_blog(f"{niche} Guide", content_res.get("content",""))
     add_campaign_sql(niche, keywords, products, content_res.get("content",""), publish_res.get("blog_url",""))
-    return {
-        "niche": niche,
-        "keywords": keywords,
-        "products": products,
-        "blog_url": publish_res.get("blog_url","")
-    }
+    return {"niche": niche,"keywords": keywords,"products": products,"blog_url": publish_res.get("blog_url","")}
 
 # ========================
 # CAMPAIGN HISTORY
@@ -235,4 +218,4 @@ def campaigns():
 # SERVER START
 # ========================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=False)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
