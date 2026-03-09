@@ -1,4 +1,4 @@
-# ======================== AI MARKETING SYSTEM ========================
+    # ======================== AI MARKETING SYSTEM ========================
 
 import os, requests, sqlite3, uuid
 from datetime import datetime
@@ -13,7 +13,7 @@ CORS(app)
 # MISTRAL API (Direct Integration)
 # ========================
 
-MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"  # Your API key
+MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"  # Replace with your API key
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
 
@@ -26,18 +26,13 @@ HEADERS = {
 # BACKEND URL
 # ========================
 
-BACKEND_URL = "https://umar-k20u.onrender.com"  # Replace with your deployed URL
+BACKEND_URL = "https://umar-k20u.onrender.com"  # Replace with your Render URL
 
 # ========================
 # GOOGLE TRENDS
 # ========================
 
-pytrends = TrendReq(
-    hl="en-US",
-    tz=360,
-    retries=2,
-    backoff_factor=0.1
-)
+pytrends = TrendReq(hl="en-US", tz=360, retries=2, backoff_factor=0.1)
 
 # ========================
 # DATABASE SETUP
@@ -77,7 +72,7 @@ def autocomplete_keywords(keyword):
     try:
         url = "https://suggestqueries.google.com/complete/search"
         params = {"client":"firefox","q":keyword}
-        r = requests.get(url, params=params)
+        r = requests.get(url, params=params, timeout=10)
         data = r.json()
         return data[1][:5]
     except:
@@ -100,7 +95,7 @@ def trend_keywords(keyword):
     return []
 
 # ========================
-# KEYWORD ENGINE (Trends + Autocomplete)
+# KEYWORD ENGINE
 # ========================
 
 def keyword_engine(niche):
@@ -116,15 +111,22 @@ def keyword_engine(niche):
 # ========================
 
 def content_tool(keyword):
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": f"Write SEO article about {keyword}"}],
-        "temperature": 0.7
-    }
-    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    return data["choices"][0]["message"]["content"]
+    try:
+        payload = {
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": f"Write SEO article about {keyword}"}],
+            "temperature": 0.7
+        }
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.HTTPError as e:
+        print("Mistral API HTTP Error:", e)
+        return f"Error generating content: {str(e)}"
+    except Exception as e:
+        print("Mistral API Error:", e)
+        return f"Error generating content: {str(e)}"
 
 # ========================
 # BLOG PUBLISHER
@@ -157,15 +159,19 @@ def view_blog(slug):
 # ========================
 
 def ai_planner(command):
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [{"role": "user", "content": f"Create marketing plan for: {command}"}],
-        "temperature": 0.2
-    }
-    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    return data["choices"][0]["message"]["content"]
+    try:
+        payload = {
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": f"Create marketing plan for: {command}"}],
+            "temperature": 0.2
+        }
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        print("AI Planner Error:", e)
+        return f"Error generating plan: {str(e)}"
 
 # ========================
 # MARKETING AGENT
@@ -184,12 +190,11 @@ def marketing_agent(command):
     else:
         niche = "digital products"
 
-    # 🔥 Real keyword engine (Trends + Autocomplete)
     keywords = keyword_engine(niche)
     article = content_tool(keywords[0])
     blog_url = publish_blog(f"{niche} guide", article)
 
-    # Save to database
+    # Save campaign
     campaign_id = str(uuid.uuid4())
     created = datetime.utcnow().isoformat()
     cursor.execute(
@@ -205,13 +210,28 @@ def marketing_agent(command):
 # ========================
 
 @app.route("/command", methods=["POST"])
-def command():
+def command_route():
     data = request.json
     cmd = data.get("command")
     if not cmd:
         return jsonify({"status":"error","message":"No command provided"})
     result = marketing_agent(cmd)
     return jsonify(result)
+
+# ========================
+# HEALTH CHECK ROUTE
+# ========================
+
+@app.route("/health")
+def health():
+    # Check server is running
+    try:
+        # Optionally check DB connection
+        cursor.execute("SELECT 1")
+        db_status = True
+    except:
+        db_status = False
+    return jsonify({"status":"running", "database": db_status})
 
 # ========================
 # HOME ROUTE
