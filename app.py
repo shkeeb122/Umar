@@ -10,10 +10,12 @@ app = Flask(__name__)
 CORS(app)
 
 # ========================
-# MISTRAL API (Direct Integration)
+# MISTRAL API (Environment Variable)
 # ========================
 
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")  # API key will come from Render environment
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
+if not MISTRAL_API_KEY:
+    raise ValueError("MISTRAL_API_KEY missing! Set it in Render environment variables.")
 
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
@@ -27,43 +29,47 @@ HEADERS = {
 # BACKEND URL
 # ========================
 
-BACKEND_URL = "https://umar-k20u.onrender.com"
+BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 
 # ========================
 # GOOGLE TRENDS
 # ========================
 
-pytrends = TrendReq(hl="en-US", tz=360, retries=2, backoff_factor=0.1)
+try:
+    pytrends = TrendReq(hl="en-US", tz=360, retries=2, backoff_factor=0.1)
+except Exception as e:
+    print("Pytrends init error:", e)
+    pytrends = None
 
 # ========================
 # DATABASE SETUP
 # ========================
 
-conn = sqlite3.connect("ai_system.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS campaigns(
-id TEXT PRIMARY KEY,
-niche TEXT,
-keywords TEXT,
-content TEXT,
-blog_url TEXT,
-created_at TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS posts(
-id TEXT PRIMARY KEY,
-title TEXT,
-content TEXT,
-slug TEXT,
-created_at TEXT
-)
-""")
-
-conn.commit()
+try:
+    conn = sqlite3.connect("ai_system.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS campaigns(
+        id TEXT PRIMARY KEY,
+        niche TEXT,
+        keywords TEXT,
+        content TEXT,
+        blog_url TEXT,
+        created_at TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts(
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        content TEXT,
+        slug TEXT,
+        created_at TEXT
+        )
+    """)
+    conn.commit()
+except Exception as e:
+    raise RuntimeError(f"Database init error: {e}")
 
 # ========================
 # GOOGLE AUTOCOMPLETE
@@ -74,8 +80,7 @@ def autocomplete_keywords(keyword):
         url = "https://suggestqueries.google.com/complete/search"
         params = {"client":"firefox","q":keyword}
         r = requests.get(url, params=params, timeout=10)
-        data = r.json()
-        return data[1][:5]
+        return r.json()[1][:5]
     except:
         return []
 
@@ -85,12 +90,13 @@ def autocomplete_keywords(keyword):
 
 def trend_keywords(keyword):
     try:
-        pytrends.build_payload([keyword], timeframe="today 12-m")
-        data = pytrends.related_queries()
-        if keyword in data:
-            top = data[keyword]["top"]
-            if top is not None:
-                return top["query"].head(5).tolist()
+        if pytrends:
+            pytrends.build_payload([keyword], timeframe="today 12-m")
+            data = pytrends.related_queries()
+            if keyword in data:
+                top = data[keyword]["top"]
+                if top is not None:
+                    return top["query"].head(5).tolist()
     except Exception as e:
         print("Trend error:", e)
     return []
@@ -108,7 +114,7 @@ def keyword_engine(niche):
     return keywords[:5]
 
 # ========================
-# AI CONTENT GENERATOR (Mistral)
+# AI CONTENT GENERATOR
 # ========================
 
 def content_tool(keyword):
@@ -120,11 +126,7 @@ def content_tool(keyword):
         }
         r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
         r.raise_for_status()
-        data = r.json()
-        return data["choices"][0]["message"]["content"]
-    except requests.exceptions.HTTPError as e:
-        print("Mistral API HTTP Error:", e)
-        return f"Error generating content: {str(e)}"
+        return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         print("Mistral API Error:", e)
         return f"Error generating content: {str(e)}"
@@ -152,8 +154,7 @@ def view_blog(slug):
     if not post:
         return "Blog not found"
     title, content = post
-    html = f"<h1>{title}</h1><hr><div>{content}</div>"
-    return render_template_string(html)
+    return render_template_string(f"<h1>{title}</h1><hr><div>{content}</div>")
 
 # ========================
 # AI PLANNER
@@ -168,8 +169,7 @@ def ai_planner(command):
         }
         r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
         r.raise_for_status()
-        data = r.json()
-        return data["choices"][0]["message"]["content"]
+        return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         print("AI Planner Error:", e)
         return f"Error generating plan: {str(e)}"
@@ -180,7 +180,6 @@ def ai_planner(command):
 
 def marketing_agent(command):
     cmd_lower = command.lower()
-
     if "fitness" in cmd_lower:
         niche = "fitness"
     elif "hosting" in cmd_lower:
@@ -198,19 +197,13 @@ def marketing_agent(command):
 
     campaign_id = str(uuid.uuid4())
     created = datetime.utcnow().isoformat()
-
     cursor.execute(
         "INSERT INTO campaigns VALUES (?,?,?,?,?,?)",
         (campaign_id, niche, ",".join(keywords), article, blog_url, created)
     )
-
     conn.commit()
 
-    return {
-        "niche": niche,
-        "keywords": keywords,
-        "blog_url": blog_url
-    }
+    return {"niche": niche, "keywords": keywords, "blog_url": blog_url}
 
 # ========================
 # COMMAND ROUTE
@@ -218,34 +211,24 @@ def marketing_agent(command):
 
 @app.route("/command", methods=["POST"])
 def command_route():
-
     data = request.json
     cmd = data.get("command")
-
     if not cmd:
         return jsonify({"status":"error","message":"No command provided"})
-
-    result = marketing_agent(cmd)
-
-    return jsonify(result)
+    return jsonify(marketing_agent(cmd))
 
 # ========================
-# HEALTH CHECK ROUTE
+# HEALTH CHECK
 # ========================
 
 @app.route("/health")
 def health():
-
     try:
         cursor.execute("SELECT 1")
         db_status = True
     except:
         db_status = False
-
-    return jsonify({
-        "status":"running",
-        "database": db_status
-    })
+    return jsonify({"status":"running","database": db_status})
 
 # ========================
 # HOME ROUTE
@@ -253,13 +236,12 @@ def health():
 
 @app.route("/")
 def home():
-    return jsonify({
-        "status":"AI marketing system running"
-    })
+    return jsonify({"status":"AI marketing system running"})
 
 # ========================
-# START SERVER
+# START SERVER (Render PORT)
 # ========================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    PORT = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=PORT)
