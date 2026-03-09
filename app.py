@@ -1,4 +1,5 @@
-# ======================== FIXED SCRIPT WITH GOOGLE TRENDS ========================
+# ======================== AI MARKETING SYSTEM ========================
+
 import os, requests, sqlite3, uuid
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
@@ -9,26 +10,39 @@ app = Flask(__name__)
 CORS(app)
 
 # ========================
-# MISTRAL API
+# MISTRAL API (Direct Integration)
 # ========================
-MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"
+
+MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"  # Your API key
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
-HEADERS = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
+
+HEADERS = {
+    "Authorization": f"Bearer {MISTRAL_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 # ========================
-# DEPLOYED BACKEND URL
+# BACKEND URL
 # ========================
-BACKEND_URL = "https://umar-k20u.onrender.com"
+
+BACKEND_URL = "https://umar-k20u.onrender.com"  # Replace with your deployed URL
 
 # ========================
-# GOOGLE TRENDS INIT
+# GOOGLE TRENDS
 # ========================
-pytrends = TrendReq(hl='en-US', tz=360)
+
+pytrends = TrendReq(
+    hl="en-US",
+    tz=360,
+    retries=2,
+    backoff_factor=0.1
+)
 
 # ========================
-# SQLITE DB
+# DATABASE SETUP
 # ========================
+
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -37,10 +51,8 @@ CREATE TABLE IF NOT EXISTS campaigns(
 id TEXT PRIMARY KEY,
 niche TEXT,
 keywords TEXT,
-products TEXT,
 content TEXT,
 blog_url TEXT,
-status TEXT,
 created_at TEXT
 )
 """)
@@ -58,323 +70,160 @@ created_at TEXT
 conn.commit()
 
 # ========================
-# SAVE CAMPAIGN
+# GOOGLE AUTOCOMPLETE
 # ========================
-def add_campaign_sql(niche, keywords, products, content, blog_url):
 
-    campaign_id = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
-
-    cursor.execute(
-        "INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)",
-        (
-            campaign_id,
-            niche,
-            ",".join(keywords),
-            ",".join([p["name"] for p in products]),
-            content,
-            blog_url,
-            "published",
-            created_at
-        )
-    )
-
-    conn.commit()
-
-    return {"status":"success"}
+def autocomplete_keywords(keyword):
+    try:
+        url = "https://suggestqueries.google.com/complete/search"
+        params = {"client":"firefox","q":keyword}
+        r = requests.get(url, params=params)
+        data = r.json()
+        return data[1][:5]
+    except:
+        return []
 
 # ========================
-# PUBLISH BLOG
+# GOOGLE TRENDS
 # ========================
-def publish_local_blog(title, content):
 
+def trend_keywords(keyword):
+    try:
+        pytrends.build_payload([keyword], timeframe="today 12-m")
+        data = pytrends.related_queries()
+        if keyword in data:
+            top = data[keyword]["top"]
+            if top is not None:
+                return top["query"].head(5).tolist()
+    except Exception as e:
+        print("Trend error:", e)
+    return []
+
+# ========================
+# KEYWORD ENGINE (Trends + Autocomplete)
+# ========================
+
+def keyword_engine(niche):
+    trends = trend_keywords(niche)
+    auto = autocomplete_keywords(niche)
+    keywords = list(set(trends + auto))
+    if not keywords:
+        keywords = [f"best {niche}", f"{niche} review", f"{niche} guide"]
+    return keywords[:5]
+
+# ========================
+# AI CONTENT GENERATOR (Mistral)
+# ========================
+
+def content_tool(keyword):
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": f"Write SEO article about {keyword}"}],
+        "temperature": 0.7
+    }
+    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data["choices"][0]["message"]["content"]
+
+# ========================
+# BLOG PUBLISHER
+# ========================
+
+def publish_blog(title, content):
     slug = str(uuid.uuid4())[:8]
     post_id = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
-
-    cursor.execute(
-        "INSERT INTO posts VALUES (?,?,?,?,?)",
-        (post_id,title,content,slug,created_at)
-    )
-
+    created = datetime.utcnow().isoformat()
+    cursor.execute("INSERT INTO posts VALUES (?,?,?,?,?)", (post_id, title, content, slug, created))
     conn.commit()
-
-    blog_url = f"{BACKEND_URL}/blog/{slug}"
-
-    return {"status":"success","blog_url": blog_url}
+    return f"{BACKEND_URL}/blog/{slug}"
 
 # ========================
 # BLOG VIEW
 # ========================
+
 @app.route("/blog/<slug>")
 def view_blog(slug):
-
-    cursor.execute(
-        "SELECT title,content,created_at FROM posts WHERE slug=?",
-        (slug,)
-    )
-
+    cursor.execute("SELECT title,content FROM posts WHERE slug=?", (slug,))
     post = cursor.fetchone()
-
     if not post:
         return "Blog not found"
-
-    title,content,created = post
-
-    html = f"""
-    <html>
-    <head><title>{title}</title></head>
-    <body style="font-family:Arial;max-width:800px;margin:auto">
-    <h1>{title}</h1>
-    <p><i>{created}</i></p>
-    <hr>
-    <div>{content}</div>
-    </body>
-    </html>
-    """
-
+    title, content = post
+    html = f"<h1>{title}</h1><hr><div>{content}</div>"
     return render_template_string(html)
-
-# ========================
-# SYSTEM CHECK
-# ========================
-@app.route("/system-check")
-def system_check():
-
-    report = {}
-
-    try:
-
-        r = requests.post(
-            MISTRAL_URL,
-            headers=HEADERS,
-            json={
-                "model":MODEL_NAME,
-                "messages":[{"role":"user","content":"test"}]
-            },
-            timeout=30
-        )
-
-        report["ai_api"] = {"status":"OK"} if r.status_code==200 else {"status":"error"}
-
-    except Exception as e:
-
-        report["ai_api"] = {"status":"error","message":str(e)}
-
-    try:
-
-        cursor.execute("SELECT COUNT(*) FROM campaigns")
-
-        report["database"] = {"status":"OK"}
-
-    except Exception as e:
-
-        report["database"] = {"status":"error","message":str(e)}
-
-    return jsonify(report)
-
-# ========================
-# HOME
-# ========================
-@app.route("/")
-def home():
-    return jsonify({"status":"AI Marketing System Running"})
-
-# ========================
-# GOOGLE TREND TOOL
-# ========================
-def trend_tool(keyword):
-
-    try:
-
-        pytrends.build_payload([keyword])
-
-        data = pytrends.related_queries()
-
-        if keyword in data and data[keyword]["top"] is not None:
-
-            trends = data[keyword]["top"]["query"].tolist()
-
-            return trends[:5]
-
-    except Exception as e:
-
-        print("Trend error:", e)
-
-    return []
-
-# ========================
-# TOOLS
-# ========================
-def niche_research_tool():
-    return [
-        "AI software",
-        "fitness products",
-        "weight loss products",
-        "web hosting",
-        "online courses"
-    ]
-
-def keyword_tool(niche):
-
-    return [
-        f"best {niche}",
-        f"{niche} review",
-        f"cheap {niche}",
-        f"top {niche} 2026"
-    ]
-
-def product_tool(niche):
-
-    return [
-        {"name":f"{niche} Pro Tool","commission":"40%"},
-        {"name":f"{niche} Premium Kit","commission":"30%"}
-    ]
-
-def content_tool(keyword):
-
-    payload = {
-        "model":MODEL_NAME,
-        "messages":[
-            {"role":"user","content":f"Write SEO article for: {keyword}"}
-        ],
-        "temperature":0.7
-    }
-
-    try:
-
-        r = requests.post(
-            MISTRAL_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=30
-        )
-
-        r.raise_for_status()
-
-        data = r.json()
-
-        content = data.get("choices",[{}])[0].get("message",{}).get("content","")
-
-        return {"status":"success","content":content}
-
-    except Exception as e:
-
-        return {"status":"error","content":""}
-
-# ========================
-# COMMAND ROUTE
-# ========================
-@app.route("/command", methods=["POST"])
-def command_route():
-
-    data = request.json
-
-    command = data.get("command")
-
-    if not command:
-        return jsonify({"status":"error","message":"No command provided"})
-
-    try:
-
-        plan_result = ai_planner(command)
-
-        marketing_result = marketing_agent(plan_result.get("plan",""), command)
-
-        return jsonify(marketing_result)
-
-    except Exception as e:
-
-        return jsonify({"status":"error","message":str(e)})
 
 # ========================
 # AI PLANNER
 # ========================
+
 def ai_planner(command):
-
-    prompt = f"User command: {command}\nCreate marketing plan."
-
     payload = {
-        "model":MODEL_NAME,
-        "messages":[{"role":"user","content":prompt}],
-        "temperature":0.2
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": f"Create marketing plan for: {command}"}],
+        "temperature": 0.2
     }
-
-    try:
-
-        r = requests.post(
-            MISTRAL_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=30
-        )
-
-        r.raise_for_status()
-
-        data = r.json()
-
-        content = data.get("choices",[{}])[0].get("message",{}).get("content","")
-
-        return {"status":"success","plan":content}
-
-    except Exception as e:
-
-        return {"status":"error","plan":"","message":str(e)}
+    r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data["choices"][0]["message"]["content"]
 
 # ========================
 # MARKETING AGENT
 # ========================
-def marketing_agent(plan, user_command):
 
-    niches = niche_research_tool()
+def marketing_agent(command):
+    cmd_lower = command.lower()
+    if "fitness" in cmd_lower:
+        niche = "fitness"
+    elif "hosting" in cmd_lower:
+        niche = "web hosting"
+    elif "ai" in cmd_lower:
+        niche = "ai tools"
+    elif "course" in cmd_lower:
+        niche = "online courses"
+    else:
+        niche = "digital products"
 
-    user_command_lower = user_command.lower()
+    # 🔥 Real keyword engine (Trends + Autocomplete)
+    keywords = keyword_engine(niche)
+    article = content_tool(keywords[0])
+    blog_url = publish_blog(f"{niche} guide", article)
 
-    niche = next((n for n in niches if n.lower() in user_command_lower), niches[0])
-
-    # 🔥 GOOGLE TRENDS KEYWORDS
-    keywords = trend_tool(niche)
-
-    # fallback if trends empty
-    if not keywords:
-        keywords = keyword_tool(niche)
-
-    products = product_tool(niche)
-
-    content_res = content_tool(keywords[0])
-
-    publish_res = publish_local_blog(
-        f"{niche} Guide",
-        content_res.get("content","")
+    # Save to database
+    campaign_id = str(uuid.uuid4())
+    created = datetime.utcnow().isoformat()
+    cursor.execute(
+        "INSERT INTO campaigns VALUES (?,?,?,?,?,?)",
+        (campaign_id, niche, ",".join(keywords), article, blog_url, created)
     )
+    conn.commit()
 
-    add_campaign_sql(
-        niche,
-        keywords,
-        products,
-        content_res.get("content",""),
-        publish_res.get("blog_url","")
-    )
-
-    return {
-        "niche": niche,
-        "keywords": keywords,
-        "products": products,
-        "blog_url": publish_res.get("blog_url","")
-    }
+    return {"niche": niche, "keywords": keywords, "blog_url": blog_url}
 
 # ========================
-# CAMPAIGN HISTORY
+# COMMAND ROUTE
 # ========================
-@app.route("/campaigns")
-def campaigns():
 
-    cursor.execute("SELECT * FROM campaigns")
-
-    return jsonify(cursor.fetchall())
+@app.route("/command", methods=["POST"])
+def command():
+    data = request.json
+    cmd = data.get("command")
+    if not cmd:
+        return jsonify({"status":"error","message":"No command provided"})
+    result = marketing_agent(cmd)
+    return jsonify(result)
 
 # ========================
-# SERVER START
+# HOME ROUTE
 # ========================
+
+@app.route("/")
+def home():
+    return jsonify({"status":"AI marketing system running"})
+
+# ========================
+# START SERVER
+# ========================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    app.run(host="0.0.0.0", port=5000)
