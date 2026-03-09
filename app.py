@@ -1,4 +1,4 @@
-    # ======================== AI MARKETING SYSTEM ========================
+# ======================== AI MARKETING SYSTEM ========================
 
 import os, requests, sqlite3, uuid
 from datetime import datetime
@@ -13,7 +13,8 @@ CORS(app)
 # MISTRAL API (Direct Integration)
 # ========================
 
-MISTRAL_API_KEY = "sD0i7S98RK9ZgrsZDZplS6zTZJI0eK"  # Replace with your API key
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")  # API key will come from Render environment
+
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
 
@@ -26,7 +27,7 @@ HEADERS = {
 # BACKEND URL
 # ========================
 
-BACKEND_URL = "https://umar-k20u.onrender.com"  # Replace with your Render URL
+BACKEND_URL = "https://umar-k20u.onrender.com"
 
 # ========================
 # GOOGLE TRENDS
@@ -179,6 +180,7 @@ def ai_planner(command):
 
 def marketing_agent(command):
     cmd_lower = command.lower()
+
     if "fitness" in cmd_lower:
         niche = "fitness"
     elif "hosting" in cmd_lower:
@@ -194,16 +196,21 @@ def marketing_agent(command):
     article = content_tool(keywords[0])
     blog_url = publish_blog(f"{niche} guide", article)
 
-    # Save campaign
     campaign_id = str(uuid.uuid4())
     created = datetime.utcnow().isoformat()
+
     cursor.execute(
         "INSERT INTO campaigns VALUES (?,?,?,?,?,?)",
         (campaign_id, niche, ",".join(keywords), article, blog_url, created)
     )
+
     conn.commit()
 
-    return {"niche": niche, "keywords": keywords, "blog_url": blog_url}
+    return {
+        "niche": niche,
+        "keywords": keywords,
+        "blog_url": blog_url
+    }
 
 # ========================
 # COMMAND ROUTE
@@ -211,11 +218,15 @@ def marketing_agent(command):
 
 @app.route("/command", methods=["POST"])
 def command_route():
+
     data = request.json
     cmd = data.get("command")
+
     if not cmd:
         return jsonify({"status":"error","message":"No command provided"})
+
     result = marketing_agent(cmd)
+
     return jsonify(result)
 
 # ========================
@@ -224,14 +235,17 @@ def command_route():
 
 @app.route("/health")
 def health():
-    # Check server is running
+
     try:
-        # Optionally check DB connection
         cursor.execute("SELECT 1")
         db_status = True
     except:
         db_status = False
-    return jsonify({"status":"running", "database": db_status})
+
+    return jsonify({
+        "status":"running",
+        "database": db_status
+    })
 
 # ========================
 # HOME ROUTE
@@ -239,7 +253,9 @@ def health():
 
 @app.route("/")
 def home():
-    return jsonify({"status":"AI marketing system running"})
+    return jsonify({
+        "status":"AI marketing system running"
+    })
 
 # ========================
 # START SERVER
