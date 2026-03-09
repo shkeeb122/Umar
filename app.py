@@ -164,7 +164,6 @@ def marketing_agent(command):
         )
         conn.commit()
 
-        # Optional: products field for frontend
         products = [{"name": k} for k in keywords]
 
         return {"status":"success", "niche": niche, "keywords": keywords, "blog_url": blog_url, "products": products}
