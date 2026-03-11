@@ -74,14 +74,16 @@ conn.commit()
 # ========================
 
 def serpapi_keywords(query):
-
     if not SERP_API_KEY:
         return []
 
     try:
+        # Clean the query
+        query = query.strip()
+        if query.startswith("q="):
+            query = query[2:].strip()
 
         url = "https://serpapi.com/search.json"
-
         params = {
             "engine": "google_autocomplete",
             "q": query,
@@ -89,21 +91,20 @@ def serpapi_keywords(query):
         }
 
         r = requests.get(url, params=params, timeout=20)
-
         data = r.json()
-
         suggestions = []
 
         if "suggestions" in data:
             for s in data["suggestions"][:5]:
                 suggestions.append(s["value"])
 
+        # Debug log
+        print(f"SERPAPI suggestions for '{query}': {suggestions}")
+
         return suggestions
 
     except Exception as e:
-
         print("SerpAPI error:", e)
-
         return []
 
 # ========================
@@ -111,9 +112,14 @@ def serpapi_keywords(query):
 # ========================
 
 def keyword_engine(query):
+    query = query.strip()
+    if query.startswith("q="):
+        query = query[2:].strip()
 
+    # Fetch real-time SERPAPI suggestions
     keywords = serpapi_keywords(query)
 
+    # Optional: fallback only if no live suggestions
     if not keywords:
         keywords = [
             f"best {query}",
@@ -130,9 +136,7 @@ def keyword_engine(query):
 # ========================
 
 def content_tool(keyword):
-
     try:
-
         payload = {
             "model": MODEL_NAME,
             "messages": [
@@ -152,13 +156,10 @@ def content_tool(keyword):
         )
 
         r.raise_for_status()
-
         return r.json()["choices"][0]["message"]["content"]
 
     except Exception as e:
-
         print("Mistral API Error:", e)
-
         return "Content generation failed"
 
 # ========================
@@ -166,25 +167,21 @@ def content_tool(keyword):
 # ========================
 
 def publish_blog(title, content):
-
     try:
-
         slug = str(uuid.uuid4())[:8]
         post_id = str(uuid.uuid4())
-
         created = datetime.utcnow().isoformat()
 
         cursor.execute(
             "INSERT INTO posts VALUES (?,?,?,?,?)",
             (post_id, title, content, slug, created)
         )
-
         conn.commit()
 
         return f"{BACKEND_URL}/blog/{slug}"
 
-    except:
-
+    except Exception as e:
+        print("Blog publish error:", e)
         return f"{BACKEND_URL}/blog/error"
 
 # ========================
@@ -192,19 +189,16 @@ def publish_blog(title, content):
 # ========================
 
 def marketing_agent(command):
-
     try:
-
-        query = command.lower()
+        query = command.lower().strip()
+        if query.startswith("q="):
+            query = query[2:].strip()
 
         keywords = keyword_engine(query)
-
         article = content_tool(keywords[0])
-
         blog_url = publish_blog(f"{keywords[0]} guide", article)
 
         campaign_id = str(uuid.uuid4())
-
         created = datetime.utcnow().isoformat()
 
         cursor.execute(
@@ -218,7 +212,6 @@ def marketing_agent(command):
                 created
             )
         )
-
         conn.commit()
 
         products = [{"name": k} for k in keywords]
@@ -232,7 +225,6 @@ def marketing_agent(command):
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "message": str(e),
@@ -245,7 +237,6 @@ def marketing_agent(command):
 
 @app.route("/command", methods=["POST"])
 def command_route():
-
     data = request.json
     cmd = data.get("command")
 
@@ -256,7 +247,6 @@ def command_route():
 
 @app.route("/health")
 def health():
-
     try:
         cursor.execute("SELECT 1")
         db_status = True
@@ -270,19 +260,14 @@ def health():
 
 @app.route("/blog/<slug>")
 def view_blog(slug):
-
     cursor.execute(
         "SELECT title,content FROM posts WHERE slug=?",
         (slug,)
     )
-
     post = cursor.fetchone()
-
     if not post:
         return "Blog not found"
-
     title, content = post
-
     return render_template_string(
         f"<h1>{title}</h1><hr><div>{content}</div>"
     )
@@ -298,7 +283,5 @@ def home():
 # ========================
 
 if __name__ == "__main__":
-
     PORT = int(os.environ.get("PORT", 5000))
-
     app.run(host="0.0.0.0", port=PORT)
