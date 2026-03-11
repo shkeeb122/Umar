@@ -9,11 +9,11 @@ app = Flask(__name__)
 CORS(app)
 
 # ========================
-# API KEYS (Environment Variables)
+# API KEYS
 # ========================
 
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
-SERP_API_KEY = os.environ.get("SERPAPI_KEY")
+SERP_API_KEY = os.environ.get("SERP_API_KEY")
 
 if not MISTRAL_API_KEY:
     raise ValueError("MISTRAL_API_KEY missing!")
@@ -40,7 +40,7 @@ BACKEND_URL = os.environ.get(
 )
 
 # ========================
-# DATABASE SETUP
+# DATABASE
 # ========================
 
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
@@ -70,7 +70,7 @@ created_at TEXT
 conn.commit()
 
 # ========================
-# SERP API KEYWORD ENGINE
+# SERP API KEYWORDS
 # ========================
 
 def serpapi_keywords(query):
@@ -126,7 +126,7 @@ def keyword_engine(query):
     return keywords[:5]
 
 # ========================
-# AI CONTENT GENERATOR
+# AI CONTENT
 # ========================
 
 def content_tool(keyword):
@@ -162,7 +162,7 @@ def content_tool(keyword):
         return "Content generation failed"
 
 # ========================
-# BLOG PUBLISHER
+# BLOG PUBLISH
 # ========================
 
 def publish_blog(title, content):
@@ -240,15 +240,13 @@ def marketing_agent(command):
         }
 
 # ========================
-# COMMAND ROUTE
+# ROUTES
 # ========================
 
 @app.route("/command", methods=["POST"])
-
 def command_route():
 
     data = request.json
-
     cmd = data.get("command")
 
     if not cmd:
@@ -256,12 +254,7 @@ def command_route():
 
     return jsonify(marketing_agent(cmd))
 
-# ========================
-# HEALTH CHECK
-# ========================
-
 @app.route("/health")
-
 def health():
 
     try:
@@ -275,12 +268,7 @@ def health():
         "database": db_status
     })
 
-# ========================
-# BLOG VIEW
-# ========================
-
 @app.route("/blog/<slug>")
-
 def view_blog(slug):
 
     cursor.execute(
@@ -299,19 +287,14 @@ def view_blog(slug):
         f"<h1>{title}</h1><hr><div>{content}</div>"
     )
 
-# ========================
-# HOME
-# ========================
-
 @app.route("/")
-
 def home():
     return jsonify({
         "status": "AI marketing system running"
     })
 
 # ========================
-# SERVER START
+# SERVER
 # ========================
 
 if __name__ == "__main__":
