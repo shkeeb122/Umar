@@ -74,11 +74,12 @@ conn.commit()
 # ========================
 
 def serpapi_keywords(query):
+    """Fetch live keyword suggestions from SERPAPI"""
     if not SERP_API_KEY:
+        print("SERPAPI key missing!")
         return []
 
     try:
-        # Clean the query
         query = query.strip()
         if query.startswith("q="):
             query = query[2:].strip()
@@ -91,20 +92,21 @@ def serpapi_keywords(query):
         }
 
         r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
         data = r.json()
+
         suggestions = []
+        if "suggestions" in data and len(data["suggestions"]) > 0:
+            for s in data["suggestions"][:10]:
+                suggestions.append(s.get("value", "").strip())
 
-        if "suggestions" in data:
-            for s in data["suggestions"][:5]:
-                suggestions.append(s["value"])
-
-        # Debug log
-        print(f"SERPAPI suggestions for '{query}': {suggestions}")
+        # Debug log for verification
+        print(f"[SERPAPI] Query: '{query}' -> Suggestions: {suggestions}")
 
         return suggestions
 
     except Exception as e:
-        print("SerpAPI error:", e)
+        print("SERPAPI API error:", e)
         return []
 
 # ========================
@@ -112,15 +114,14 @@ def serpapi_keywords(query):
 # ========================
 
 def keyword_engine(query):
+    """Get keywords: try SERPAPI first, fallback to default"""
     query = query.strip()
     if query.startswith("q="):
         query = query[2:].strip()
 
-    # Fetch real-time SERPAPI suggestions
     keywords = serpapi_keywords(query)
 
-    # Optional: fallback only if no live suggestions
-    if not keywords:
+    if not keywords:  # fallback if no live suggestions
         keywords = [
             f"best {query}",
             f"{query} review",
@@ -128,11 +129,12 @@ def keyword_engine(query):
             f"{query} software",
             f"{query} guide"
         ]
+        print(f"[Fallback] Using default keywords for '{query}': {keywords}")
 
     return keywords[:5]
 
 # ========================
-# AI CONTENT
+# AI CONTENT GENERATION
 # ========================
 
 def content_tool(keyword):
@@ -140,23 +142,15 @@ def content_tool(keyword):
         payload = {
             "model": MODEL_NAME,
             "messages": [
-                {
-                    "role": "user",
-                    "content": f"Write a detailed SEO article about {keyword}"
-                }
+                {"role": "user", "content": f"Write a detailed SEO article about {keyword}"}
             ],
             "temperature": 0.7
         }
 
-        r = requests.post(
-            MISTRAL_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=40
-        )
-
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=40)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        content = r.json()["choices"][0]["message"]["content"]
+        return content
 
     except Exception as e:
         print("Mistral API Error:", e)
@@ -177,7 +171,6 @@ def publish_blog(title, content):
             (post_id, title, content, slug, created)
         )
         conn.commit()
-
         return f"{BACKEND_URL}/blog/{slug}"
 
     except Exception as e:
@@ -194,26 +187,26 @@ def marketing_agent(command):
         if query.startswith("q="):
             query = query[2:].strip()
 
+        # Step 1: Get live keywords
         keywords = keyword_engine(query)
+
+        # Step 2: Generate content for top keyword
         article = content_tool(keywords[0])
+
+        # Step 3: Publish blog
         blog_url = publish_blog(f"{keywords[0]} guide", article)
 
+        # Step 4: Save campaign
         campaign_id = str(uuid.uuid4())
         created = datetime.utcnow().isoformat()
 
         cursor.execute(
             "INSERT INTO campaigns VALUES (?,?,?,?,?,?)",
-            (
-                campaign_id,
-                query,
-                ",".join(keywords),
-                article,
-                blog_url,
-                created
-            )
+            (campaign_id, query, ",".join(keywords), article, blog_url, created)
         )
         conn.commit()
 
+        # Step 5: Prepare products
         products = [{"name": k} for k in keywords]
 
         return {
@@ -239,10 +232,8 @@ def marketing_agent(command):
 def command_route():
     data = request.json
     cmd = data.get("command")
-
     if not cmd:
         return jsonify({"status": "error", "message": "No command provided"})
-
     return jsonify(marketing_agent(cmd))
 
 @app.route("/health")
@@ -252,31 +243,20 @@ def health():
         db_status = True
     except:
         db_status = False
-
-    return jsonify({
-        "status": "running",
-        "database": db_status
-    })
+    return jsonify({"status": "running", "database": db_status})
 
 @app.route("/blog/<slug>")
 def view_blog(slug):
-    cursor.execute(
-        "SELECT title,content FROM posts WHERE slug=?",
-        (slug,)
-    )
+    cursor.execute("SELECT title,content FROM posts WHERE slug=?", (slug,))
     post = cursor.fetchone()
     if not post:
         return "Blog not found"
     title, content = post
-    return render_template_string(
-        f"<h1>{title}</h1><hr><div>{content}</div>"
-    )
+    return render_template_string(f"<h1>{title}</h1><hr><div>{content}</div>")
 
 @app.route("/")
 def home():
-    return jsonify({
-        "status": "AI marketing system running"
-    })
+    return jsonify({"status": "AI marketing system running"})
 
 # ========================
 # SERVER
