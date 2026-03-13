@@ -46,6 +46,7 @@ BACKEND_URL = os.environ.get(
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Campaigns table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS campaigns(
 id TEXT PRIMARY KEY,
@@ -58,6 +59,7 @@ created_at TEXT
 )
 """)
 
+# Posts table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS posts(
 id TEXT PRIMARY KEY,
@@ -68,6 +70,19 @@ created_at TEXT
 )
 """)
 
+# Task history table
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS task_history(
+id TEXT PRIMARY KEY,
+campaign_id TEXT,
+step_name TEXT,
+status TEXT,
+source TEXT,
+note TEXT,
+timestamp TEXT
+)
+""")
+
 conn.commit()
 
 # ========================
@@ -75,7 +90,6 @@ conn.commit()
 # ========================
 
 def serpapi_keywords(query):
-    """Fetch live keyword suggestions from SERPAPI"""
     if not SERP_API_KEY:
         print("[SERPAPI] Key missing")
         return []
@@ -97,7 +111,6 @@ def serpapi_keywords(query):
         if "suggestions" in data:
             for s in data["suggestions"]:
                 value = s.get("value", "").strip()
-                # ignore old years
                 if "2023" in value or "2022" in value:
                     continue
                 if value:
@@ -115,7 +128,6 @@ def serpapi_keywords(query):
 # ========================
 
 def keyword_engine(query):
-    """Get keywords: try SERPAPI first, fallback to default"""
     query = query.strip()
     if query.startswith("q="):
         query = query[2:].strip()
@@ -124,7 +136,6 @@ def keyword_engine(query):
     source = "SERPAPI"
 
     if not keywords:
-        # fallback if no live suggestions
         keywords = [
             f"best {query} 2026",
             f"{query} tools 2026",
@@ -141,8 +152,7 @@ def keyword_engine(query):
 # AI CONTENT GENERATION
 # ========================
 
-def content_tool(keyword, fallback=False):
-    """Generate article content using Mistral API"""
+def content_tool(keyword):
     try:
         prompt = f"Write a detailed SEO blog article about {keyword}. Make it fully updated for 2026 trends."
         payload = {
@@ -184,6 +194,18 @@ def publish_blog(title, content):
         return f"{BACKEND_URL}/blog/error"
 
 # ========================
+# LOG TASK HISTORY
+# ========================
+
+def log_task(campaign_id, step_name, status, source, note=""):
+    task_id = str(uuid.uuid4())
+    timestamp = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO task_history VALUES (?,?,?,?,?,?,?)
+    """, (task_id, campaign_id, step_name, status, source, note, timestamp))
+    conn.commit()
+
+# ========================
 # MARKETING AGENT
 # ========================
 
@@ -193,19 +215,22 @@ def marketing_agent(command):
         if query.startswith("q="):
             query = query[2:].strip()
 
-        # 1. Keyword research
-        keywords, source = keyword_engine(query)
-
-        # 2. Content generation
-        article, content_source = content_tool(keywords[0])
-
-        # 3. Publish blog
-        blog_url = publish_blog(f"{keywords[0]} guide", article)
-
-        # 4. Save campaign
         campaign_id = str(uuid.uuid4())
         created = datetime.utcnow().isoformat()
 
+        # Step 1: Keyword research
+        keywords, source = keyword_engine(query)
+        log_task(campaign_id, "Keyword Research", "success" if keywords else "failed", source, note=", ".join(keywords))
+
+        # Step 2: Content generation
+        article, content_source = content_tool(keywords[0])
+        log_task(campaign_id, "Content Generation", "success" if article else "failed", content_source)
+
+        # Step 3: Publish blog
+        blog_url = publish_blog(f"{keywords[0]} guide", article)
+        log_task(campaign_id, "Blog Publish", "success" if blog_url else "failed", "SYSTEM", note=blog_url)
+
+        # Step 4: Save campaign
         cursor.execute(
             "INSERT INTO campaigns VALUES (?,?,?,?,?,?,?)",
             (campaign_id, query, ",".join(keywords), article, blog_url, f"{source}|{content_source}", created)
@@ -216,6 +241,7 @@ def marketing_agent(command):
 
         return {
             "status": "success",
+            "campaign_id": campaign_id,
             "niche": query,
             "keywords": keywords,
             "products": products,
@@ -260,6 +286,27 @@ def view_blog(slug):
     title, content = post
     return render_template_string(f"<h1>{title}</h1><hr><div>{content}</div>")
 
+# ========================
+# HISTORY ROUTE
+# ========================
+
+@app.route("/history/<campaign_id>")
+def view_history(campaign_id):
+    cursor.execute("SELECT step_name,status,source,note,timestamp FROM task_history WHERE campaign_id=? ORDER BY timestamp", (campaign_id,))
+    tasks = cursor.fetchall()
+    if not tasks:
+        return jsonify({"status": "error", "message": "No history found for this campaign"})
+    history = []
+    for t in tasks:
+        history.append({
+            "step_name": t[0],
+            "status": t[1],
+            "source": t[2],
+            "note": t[3],
+            "timestamp": t[4]
+        })
+    return jsonify({"status": "success", "campaign_id": campaign_id, "history": history})
+
 @app.route("/")
 def home():
     return jsonify({"status": "AI marketing system running"})
@@ -270,4 +317,6 @@ def home():
 
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=PORT)                
+        
+    
