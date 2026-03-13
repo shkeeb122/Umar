@@ -70,43 +70,50 @@ created_at TEXT
 conn.commit()
 
 # ========================
-# SERP API KEYWORDS
+# SERPAPI KEYWORDS
 # ========================
 
 def serpapi_keywords(query):
-    """Fetch live keyword suggestions from SERPAPI"""
+
     if not SERP_API_KEY:
-        print("SERPAPI key missing!")
+        print("[SERPAPI] Key missing")
         return []
 
     try:
-        query = query.strip()
-        if query.startswith("q="):
-            query = query[2:].strip()
 
         url = "https://serpapi.com/search.json"
+
         params = {
             "engine": "google_autocomplete",
             "q": query,
             "api_key": SERP_API_KEY
         }
 
-        r = requests.get(url, params=params, timeout=20)
+        r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
+
         data = r.json()
 
         suggestions = []
-        if "suggestions" in data and len(data["suggestions"]) > 0:
-            for s in data["suggestions"][:10]:
-                suggestions.append(s.get("value", "").strip())
 
-        # Debug log for verification
-        print(f"[SERPAPI] Query: '{query}' -> Suggestions: {suggestions}")
+        if "suggestions" in data:
+            for s in data["suggestions"]:
+                value = s.get("value", "").strip()
 
-        return suggestions
+                # remove old year keywords
+                if "2023" in value or "2022" in value:
+                    continue
+
+                if value:
+                    suggestions.append(value)
+
+        print(f"[SERPAPI LIVE] Query: {query}")
+        print(f"[SERPAPI LIVE] Suggestions: {suggestions}")
+
+        return suggestions[:10]
 
     except Exception as e:
-        print("SERPAPI API error:", e)
+        print("[SERPAPI ERROR]", e)
         return []
 
 # ========================
@@ -114,22 +121,25 @@ def serpapi_keywords(query):
 # ========================
 
 def keyword_engine(query):
-    """Get keywords: try SERPAPI first, fallback to default"""
+
     query = query.strip()
+
     if query.startswith("q="):
         query = query[2:].strip()
 
     keywords = serpapi_keywords(query)
 
-    if not keywords:  # fallback if no live suggestions
+    if not keywords:
+
         keywords = [
             f"best {query}",
-            f"{query} review",
             f"{query} tools",
             f"{query} software",
-            f"{query} guide"
+            f"{query} guide",
+            f"{query} review"
         ]
-        print(f"[Fallback] Using default keywords for '{query}': {keywords}")
+
+        print("[FALLBACK KEYWORDS]", keywords)
 
     return keywords[:5]
 
@@ -138,7 +148,9 @@ def keyword_engine(query):
 # ========================
 
 def content_tool(keyword):
+
     try:
+
         payload = {
             "model": MODEL_NAME,
             "messages": [
@@ -149,11 +161,13 @@ def content_tool(keyword):
 
         r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=40)
         r.raise_for_status()
+
         content = r.json()["choices"][0]["message"]["content"]
+
         return content
 
     except Exception as e:
-        print("Mistral API Error:", e)
+        print("[MISTRAL ERROR]", e)
         return "Content generation failed"
 
 # ========================
@@ -161,7 +175,9 @@ def content_tool(keyword):
 # ========================
 
 def publish_blog(title, content):
+
     try:
+
         slug = str(uuid.uuid4())[:8]
         post_id = str(uuid.uuid4())
         created = datetime.utcnow().isoformat()
@@ -170,11 +186,15 @@ def publish_blog(title, content):
             "INSERT INTO posts VALUES (?,?,?,?,?)",
             (post_id, title, content, slug, created)
         )
+
         conn.commit()
+
         return f"{BACKEND_URL}/blog/{slug}"
 
     except Exception as e:
-        print("Blog publish error:", e)
+
+        print("[BLOG ERROR]", e)
+
         return f"{BACKEND_URL}/blog/error"
 
 # ========================
@@ -182,21 +202,24 @@ def publish_blog(title, content):
 # ========================
 
 def marketing_agent(command):
+
     try:
+
         query = command.lower().strip()
+
         if query.startswith("q="):
             query = query[2:].strip()
 
-        # Step 1: Get live keywords
+        # 1 keyword research
         keywords = keyword_engine(query)
 
-        # Step 2: Generate content for top keyword
+        # 2 content generation
         article = content_tool(keywords[0])
 
-        # Step 3: Publish blog
+        # 3 publish blog
         blog_url = publish_blog(f"{keywords[0]} guide", article)
 
-        # Step 4: Save campaign
+        # 4 save campaign
         campaign_id = str(uuid.uuid4())
         created = datetime.utcnow().isoformat()
 
@@ -204,9 +227,9 @@ def marketing_agent(command):
             "INSERT INTO campaigns VALUES (?,?,?,?,?,?)",
             (campaign_id, query, ",".join(keywords), article, blog_url, created)
         )
+
         conn.commit()
 
-        # Step 5: Prepare products
         products = [{"name": k} for k in keywords]
 
         return {
@@ -218,6 +241,7 @@ def marketing_agent(command):
         }
 
     except Exception as e:
+
         return {
             "status": "error",
             "message": str(e),
@@ -230,28 +254,38 @@ def marketing_agent(command):
 
 @app.route("/command", methods=["POST"])
 def command_route():
+
     data = request.json
+
     cmd = data.get("command")
+
     if not cmd:
         return jsonify({"status": "error", "message": "No command provided"})
+
     return jsonify(marketing_agent(cmd))
 
 @app.route("/health")
 def health():
+
     try:
         cursor.execute("SELECT 1")
         db_status = True
     except:
         db_status = False
+
     return jsonify({"status": "running", "database": db_status})
 
 @app.route("/blog/<slug>")
 def view_blog(slug):
+
     cursor.execute("SELECT title,content FROM posts WHERE slug=?", (slug,))
     post = cursor.fetchone()
+
     if not post:
         return "Blog not found"
+
     title, content = post
+
     return render_template_string(f"<h1>{title}</h1><hr><div>{content}</div>")
 
 @app.route("/")
@@ -263,5 +297,7 @@ def home():
 # ========================
 
 if __name__ == "__main__":
+
     PORT = int(os.environ.get("PORT", 5000))
+
     app.run(host="0.0.0.0", port=PORT)
