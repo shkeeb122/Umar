@@ -1,5 +1,6 @@
-# ======================== AI MARKETING SYSTEM ========================
-
+# ========================
+# AI MARKETING SYSTEM (App.py)
+# ========================
 import os, requests, sqlite3, uuid, traceback
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
@@ -11,7 +12,6 @@ CORS(app)
 # ========================
 # API KEYS
 # ========================
-
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 SERP_API_KEY = os.environ.get("SERP_API_KEY")
 
@@ -21,7 +21,6 @@ if not MISTRAL_API_KEY:
 # ========================
 # MISTRAL SETTINGS
 # ========================
-
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
 
@@ -33,53 +32,48 @@ HEADERS = {
 # ========================
 # BACKEND URL
 # ========================
-
 BACKEND_URL = os.environ.get(
     "BACKEND_URL",
     "https://umar-k20u.onrender.com"
 )
 
 # ========================
-# DATABASE
+# DATABASE SETUP
 # ========================
-
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Campaigns table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS campaigns(
-id TEXT PRIMARY KEY,
-niche TEXT,
-keywords TEXT,
-content TEXT,
-blog_url TEXT,
-source TEXT,
-created_at TEXT
+    id TEXT PRIMARY KEY,
+    niche TEXT,
+    keywords TEXT,
+    content TEXT,
+    blog_url TEXT,
+    source TEXT,
+    created_at TEXT
 )
 """)
 
-# Posts table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS posts(
-id TEXT PRIMARY KEY,
-title TEXT,
-content TEXT,
-slug TEXT,
-created_at TEXT
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    content TEXT,
+    slug TEXT,
+    created_at TEXT
 )
 """)
 
-# Task history table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS task_history(
-id TEXT PRIMARY KEY,
-campaign_id TEXT,
-step_name TEXT,
-status TEXT,
-source TEXT,
-note TEXT,
-timestamp TEXT
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT,
+    step_name TEXT,
+    status TEXT,
+    source TEXT,
+    note TEXT,
+    timestamp TEXT
 )
 """)
 
@@ -88,69 +82,60 @@ conn.commit()
 # ========================
 # SERPAPI KEYWORDS
 # ========================
-
 def serpapi_keywords(query):
     if not SERP_API_KEY:
         return []
-
-    try:
-        url = "https://serpapi.com/search.json"
-        params = {
-            "engine": "google_autocomplete",
-            "q": query,
-            "api_key": SERP_API_KEY
-        }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        suggestions = []
-        if "suggestions" in data:
-            for s in data["suggestions"]:
-                value = s.get("value","").strip()
-                if "2023" in value or "2022" in value:
-                    continue
-                if value:
-                    suggestions.append(value)
-        return suggestions[:10]
-    except Exception as e:
-        print("[SERPAPI ERROR]", e)
+    try:  
+        url = "https://serpapi.com/search.json"  
+        params = {  
+            "engine": "google_autocomplete",  
+            "q": query,  
+            "api_key": SERP_API_KEY  
+        }  
+        r = requests.get(url, params=params, timeout=10)  
+        r.raise_for_status()  
+        data = r.json()  
+        suggestions = []  
+        for s in data.get("suggestions", []):  
+            value = s.get("value", "").strip()  
+            if "2023" in value or "2022" in value:
+                continue
+            if value:
+                suggestions.append(value)
+        return suggestions[:10]  
+    except Exception as e:  
+        print("[SERPAPI ERROR]", e)  
         return []
 
 # ========================
 # KEYWORD ENGINE
 # ========================
-
 def keyword_engine(query):
     query = query.strip()
     if query.startswith("q="):
         query = query[2:].strip()
 
-    keywords = serpapi_keywords(query)
-    source = "SERPAPI"
-    if not keywords:
-        keywords = [
-            f"best {query} 2026",
-            f"{query} tools 2026",
-            f"{query} software 2026",
-            f"{query} guide 2026",
-            f"{query} review 2026"
-        ]
-        source = "MODEL_FALLBACK"
+    keywords = serpapi_keywords(query)  
+    source = "SERPAPI"  
+    if not keywords:  
+        keywords = [  
+            f"best {query} 2026",  
+            f"{query} tools 2026",  
+            f"{query} software 2026",  
+            f"{query} guide 2026",  
+            f"{query} review 2026"  
+        ]  
+        source = "MODEL_FALLBACK"  
     return keywords[:5], source
 
 # ========================
 # AI CONTENT GENERATION
 # ========================
-
 def content_tool(keyword, conversation_history=[]):
-    """
-    Generates content with Mistral and keeps conversation history
-    """
     try:
         prompt = f"Write a detailed SEO blog article about {keyword}. Fully updated for 2026 trends."
         messages = [{"role":"system","content":"You are an advanced marketing assistant."}]
-        for msg in conversation_history:
-            messages.append(msg)
+        messages.extend(conversation_history)
         messages.append({"role":"user","content":prompt})
         payload = {
             "model": MODEL_NAME,
@@ -169,7 +154,6 @@ def content_tool(keyword, conversation_history=[]):
 # ========================
 # BLOG PUBLISH
 # ========================
-
 def publish_blog(title, content):
     slug = str(uuid.uuid4())[:8]
     post_id = str(uuid.uuid4())
@@ -184,7 +168,6 @@ def publish_blog(title, content):
 # ========================
 # LOG TASK HISTORY
 # ========================
-
 def log_task(campaign_id, step_name, status, source, note=""):
     task_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
@@ -196,50 +179,48 @@ def log_task(campaign_id, step_name, status, source, note=""):
 # ========================
 # MARKETING AGENT
 # ========================
-
 def marketing_agent(command, conversation_history=[]):
     query = command.lower().strip()
     if query.startswith("q="):
         query = query[2:].strip()
 
-    campaign_id = str(uuid.uuid4())
-    created = datetime.utcnow().isoformat()
+    campaign_id = str(uuid.uuid4())  
+    created = datetime.utcnow().isoformat()  
 
-    # Step 1: Keyword research
-    keywords, source = keyword_engine(query)
-    log_task(campaign_id, "Keyword Research", "success" if keywords else "failed", source, note=", ".join(keywords))
+    # Step 1: Keyword research  
+    keywords, source = keyword_engine(query)  
+    log_task(campaign_id, "Keyword Research", "success" if keywords else "failed", source, note=", ".join(keywords))  
 
-    # Step 2: Content generation
-    article, content_source = content_tool(keywords[0], conversation_history)
-    log_task(campaign_id, "Content Generation", "success" if article else "failed", content_source)
+    # Step 2: Content generation  
+    article, content_source = content_tool(keywords[0], conversation_history)  
+    log_task(campaign_id, "Content Generation", "success" if article else "failed", content_source)  
 
-    # Step 3: Publish blog
-    blog_url = publish_blog(f"{keywords[0]} guide", article)
-    log_task(campaign_id, "Blog Publish", "success" if blog_url else "failed", "SYSTEM", note=blog_url)
+    # Step 3: Publish blog  
+    blog_url = publish_blog(f"{keywords[0]} guide", article)  
+    log_task(campaign_id, "Blog Publish", "success" if blog_url else "failed", "SYSTEM", note=blog_url)  
 
-    # Step 4: Save campaign
-    cursor.execute(
-        "INSERT INTO campaigns VALUES (?,?,?,?,?,?,?)",
-        (campaign_id, query, ",".join(keywords), article, blog_url, f"{source}|{content_source}", created)
-    )
-    conn.commit()
+    # Step 4: Save campaign  
+    cursor.execute(  
+        "INSERT INTO campaigns VALUES (?,?,?,?,?,?,?)",  
+        (campaign_id, query, ",".join(keywords), article, blog_url, f"{source}|{content_source}", created)  
+    )  
+    conn.commit()  
 
-    products = [{"name": k} for k in keywords]
+    products = [{"name": k} for k in keywords]  
 
-    return {
-        "status":"success",
-        "campaign_id": campaign_id,
-        "niche": query,
-        "keywords": keywords,
-        "products": products,
-        "blog_url": blog_url,
-        "source": f"{source} (keywords), {content_source} (content)"
+    return {  
+        "status":"success",  
+        "campaign_id": campaign_id,  
+        "niche": query,  
+        "keywords": keywords,  
+        "products": products,  
+        "blog_url": blog_url,  
+        "source": f"{source} (keywords), {content_source} (content)"  
     }
 
 # ========================
 # ROUTES
 # ========================
-
 @app.route("/command", methods=["POST"])
 def command_route():
     data = request.json
@@ -306,7 +287,6 @@ def home():
 # ========================
 # SERVER
 # ========================
-
 if __name__=="__main__":
     PORT = int(os.environ.get("PORT",5000))
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=PORT, debug=True)
