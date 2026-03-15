@@ -90,7 +90,6 @@ conn.commit()
 # SAVE CHAT MESSAGE
 # ========================
 def save_message(campaign_id, role, content):
-
     cursor.execute(
         "INSERT INTO conversations VALUES (?,?,?,?,?)",
         (
@@ -101,19 +100,16 @@ def save_message(campaign_id, role, content):
             datetime.utcnow().isoformat()
         )
     )
-
     conn.commit()
 
 # ========================
 # SERPAPI KEYWORDS
 # ========================
 def serpapi_keywords(query):
-
     if not SERP_API_KEY:
         return []
 
     try:
-
         r = requests.get(
             "https://serpapi.com/search.json",
             params={
@@ -123,19 +119,15 @@ def serpapi_keywords(query):
             },
             timeout=10
         )
-
         r.raise_for_status()
-
         suggestions = [
             s["value"].strip()
             for s in r.json().get("suggestions", [])
             if s.get("value")
         ]
-
         return suggestions[:10]
 
     except Exception as e:
-
         print("SERPAPI ERROR", e)
         return []
 
@@ -143,19 +135,16 @@ def serpapi_keywords(query):
 # KEYWORD ENGINE
 # ========================
 def keyword_engine(query):
-
     keywords = serpapi_keywords(query)
     source = "SERPAPI"
 
     if not keywords:
-
         keywords = [
             f"best {query} 2026",
             f"{query} tools 2026",
             f"{query} guide 2026",
             f"{query} review 2026"
         ]
-
         source = "MODEL_FALLBACK"
 
     return keywords[:5], source
@@ -164,15 +153,12 @@ def keyword_engine(query):
 # CONTENT GENERATION
 # ========================
 def content_tool(keyword, conversation_history=[]):
-
     try:
-
         messages = [
             {"role":"system","content":"You are an AI marketing assistant"}
         ] + conversation_history + [
             {"role":"user","content":f"Write SEO blog about {keyword}"}
         ]
-
         r = requests.post(
             MISTRAL_URL,
             headers=HEADERS,
@@ -183,22 +169,17 @@ def content_tool(keyword, conversation_history=[]):
             },
             timeout=40
         )
-
         r.raise_for_status()
-
         return r.json()["choices"][0]["message"]["content"], "MODEL_API"
 
     except Exception:
-
         return f"Fallback content for {keyword}", "MODEL_FALLBACK"
 
 # ========================
 # BLOG PUBLISH
 # ========================
 def publish_blog(title, content):
-
     slug = str(uuid.uuid4())[:8]
-
     cursor.execute(
         "INSERT INTO posts VALUES (?,?,?,?,?)",
         (
@@ -209,16 +190,13 @@ def publish_blog(title, content):
             datetime.utcnow().isoformat()
         )
     )
-
     conn.commit()
-
     return f"{BACKEND_URL}/blog/{slug}"
 
 # ========================
 # LOG TASK
 # ========================
 def log_task(campaign_id, step, status, source, note=""):
-
     cursor.execute(
         "INSERT INTO task_history VALUES (?,?,?,?,?,?,?)",
         (
@@ -231,14 +209,12 @@ def log_task(campaign_id, step, status, source, note=""):
             datetime.utcnow().isoformat()
         )
     )
-
     conn.commit()
 
 # ========================
 # MARKETING AGENT
 # ========================
 def marketing_agent(command, history=[]):
-
     campaign_id = str(uuid.uuid4())
     query = command.lower()
 
@@ -288,7 +264,6 @@ def marketing_agent(command, history=[]):
             datetime.utcnow().isoformat()
         )
     )
-
     conn.commit()
 
     save_message(campaign_id, "assistant", f"Blog created: {blog_url}")
@@ -307,9 +282,7 @@ def marketing_agent(command, history=[]):
 # ========================
 @app.route("/command", methods=["POST"])
 def command_route():
-
     data = request.json
-
     return jsonify(
         marketing_agent(
             data.get("command"),
@@ -319,13 +292,10 @@ def command_route():
 
 @app.route("/campaigns")
 def get_campaigns():
-
     cursor.execute(
         "SELECT id,niche,created_at FROM campaigns ORDER BY created_at DESC"
     )
-
     rows = cursor.fetchall()
-
     return jsonify({
         "status":"success",
         "campaigns":[
@@ -336,30 +306,37 @@ def get_campaigns():
 
 @app.route("/conversation/<campaign_id>")
 def get_conversation(campaign_id):
-
     rows = cursor.execute(
-        "SELECT role,content FROM conversations WHERE campaign_id=? ORDER BY timestamp",
+        "SELECT role,content,timestamp FROM conversations WHERE campaign_id=? ORDER BY timestamp",
         (campaign_id,)
     ).fetchall()
-
     return jsonify({
         "status":"success",
         "messages":[
-            {"role":r[0],"content":r[1]}
+            {"role":r[0],"content":r[1],"timestamp":r[2]}
             for r in rows
         ]
     })
 
 # ========================
+# DELETE CAMPAIGN
+# ========================
+@app.route("/campaign/delete/<campaign_id>", methods=["DELETE"])
+def delete_campaign(campaign_id):
+    cursor.execute("DELETE FROM campaigns WHERE id=?", (campaign_id,))
+    cursor.execute("DELETE FROM conversations WHERE campaign_id=?", (campaign_id,))
+    cursor.execute("DELETE FROM task_history WHERE campaign_id=?", (campaign_id,))
+    conn.commit()
+    return jsonify({"status":"success"})
+
+# ========================
 # SERVER
 # ========================
 if __name__=="__main__":
-
     PORT = int(os.environ.get("PORT",5000))
-
     app.run(
         host="0.0.0.0",
         port=PORT,
         debug=False,
         threaded=True
-)
+        )
