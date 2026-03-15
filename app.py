@@ -31,12 +31,15 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 # ========================
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
+
 cursor.execute("""CREATE TABLE IF NOT EXISTS campaigns(
     id TEXT PRIMARY KEY, niche TEXT, keywords TEXT, content TEXT, blog_url TEXT, source TEXT, created_at TEXT
 )""")
+
 cursor.execute("""CREATE TABLE IF NOT EXISTS posts(
     id TEXT PRIMARY KEY, title TEXT, content TEXT, slug TEXT, created_at TEXT
 )""")
+
 cursor.execute("""CREATE TABLE IF NOT EXISTS task_history(
     id TEXT PRIMARY KEY, campaign_id TEXT, step_name TEXT, status TEXT, source TEXT, note TEXT, timestamp TEXT
 )""")
@@ -66,6 +69,7 @@ def keyword_engine(query):
     keywords = serpapi_keywords(query)
     source = "SERPAPI"
     if not keywords:
+        # Fallback keywords
         keywords = [f"best {query} 2026", f"{query} tools 2026", f"{query} software 2026", f"{query} guide 2026", f"{query} review 2026"]
         source = "MODEL_FALLBACK"
     return keywords[:5], source
@@ -106,14 +110,24 @@ def log_task(campaign_id, step_name, status, source, note=""):
 def marketing_agent(command, conversation_history=[]):
     query = command.lower().strip().removeprefix("q=")
     campaign_id = str(uuid.uuid4())
+    
+    # Keyword Research
     keywords, source = keyword_engine(query)
     log_task(campaign_id, "Keyword Research", "success" if keywords else "failed", source, note=", ".join(keywords))
+    
+    # Content Generation
     article, content_source = content_tool(keywords[0], conversation_history)
     log_task(campaign_id, "Content Generation", "success" if article else "failed", content_source)
+    
+    # Blog Publish
     blog_url = publish_blog(f"{keywords[0]} guide", article)
     log_task(campaign_id, "Blog Publish", "success" if blog_url else "failed", "SYSTEM", note=blog_url)
+    
+    # Campaign Record
     cursor.execute("INSERT INTO campaigns VALUES (?,?,?,?,?,?,?)", (campaign_id, query, ",".join(keywords), article, blog_url, f"{source}|{content_source}", datetime.utcnow().isoformat()))
     conn.commit()
+    
+    # Response
     return {
         "status":"success",
         "campaign_id":campaign_id,
@@ -152,7 +166,6 @@ def delete_campaign(campaign_id):
 def view_history(campaign_id):
     cursor.execute("SELECT step_name,status,source,note,timestamp FROM task_history WHERE campaign_id=? ORDER BY timestamp", (campaign_id,))
     history = [{"step_name":t[0],"status":t[1],"source":t[2],"note":t[3],"timestamp":t[4]} for t in cursor.fetchall()]
-    # Return full conversation with clickable URLs
     return jsonify({"status":"success","campaign_id": campaign_id, "history": history})
 
 @app.route("/blog/<slug>")
