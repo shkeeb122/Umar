@@ -151,7 +151,9 @@ def delete_campaign(campaign_id):
 @app.route("/history/<campaign_id>")
 def view_history(campaign_id):
     cursor.execute("SELECT step_name,status,source,note,timestamp FROM task_history WHERE campaign_id=? ORDER BY timestamp", (campaign_id,))
-    return jsonify({"status":"success","campaign_id": campaign_id, "history":[{"step_name":t[0],"status":t[1],"source":t[2],"note":t[3],"timestamp":t[4]} for t in cursor.fetchall()]})
+    history = [{"step_name":t[0],"status":t[1],"source":t[2],"note":t[3],"timestamp":t[4]} for t in cursor.fetchall()]
+    # Return full conversation with clickable URLs
+    return jsonify({"status":"success","campaign_id": campaign_id, "history": history})
 
 @app.route("/blog/<slug>")
 def view_blog(slug):
