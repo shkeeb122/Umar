@@ -1,72 +1,53 @@
 import os, requests, sqlite3, uuid, json
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# ========================
-# CONFIG
-# ========================
+# ================= CONFIG =================
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
-SERP_API_KEY = os.environ.get("SERP_API_KEY")
-
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 MODEL_NAME = "mistral-small-latest"
-HEADERS = {"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"}
+
+HEADERS = {
+    "Authorization": f"Bearer {MISTRAL_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 
-# ========================
-# DATABASE
-# ========================
+# ================= DATABASE =================
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""CREATE TABLE IF NOT EXISTS campaigns(
-id TEXT PRIMARY KEY, niche TEXT, keywords TEXT, content TEXT,
-blog_url TEXT, source TEXT, conversation TEXT, created_at TEXT
-)""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS campaigns(
+id TEXT PRIMARY KEY,
+niche TEXT,
+keywords TEXT,
+content TEXT,
+blog_url TEXT,
+source TEXT,
+conversation TEXT,
+created_at TEXT
+)
+""")
 
-cursor.execute("""CREATE TABLE IF NOT EXISTS posts(
-id TEXT PRIMARY KEY, title TEXT, content TEXT, slug TEXT, created_at TEXT
-)""")
-
-cursor.execute("""CREATE TABLE IF NOT EXISTS task_history(
-id TEXT PRIMARY KEY, campaign_id TEXT, step_name TEXT, status TEXT,
-source TEXT, note TEXT, timestamp TEXT
-)""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS posts(
+id TEXT PRIMARY KEY,
+title TEXT,
+content TEXT,
+slug TEXT,
+created_at TEXT
+)
+""")
 
 conn.commit()
 
-# ========================
-# SERP KEYWORDS
-# ========================
-def serpapi_keywords(query):
-    if not SERP_API_KEY:
-        return []
-    try:
-        r = requests.get(
-            "https://serpapi.com/search.json",
-            params={"engine":"google_autocomplete","q":query,"api_key":SERP_API_KEY},
-            timeout=10
-        )
-        data = r.json()
-        return [s["value"] for s in data.get("suggestions", [])][:5]
-    except:
-        return []
-
-def keyword_engine(query):
-    keywords = serpapi_keywords(query)
-    if not keywords:
-        keywords = [f"best {query}", f"{query} review", f"{query} guide"]
-        return keywords, "FALLBACK"
-    return keywords, "SERPAPI"
-
-# ========================
-# AI CHAT
-# ========================
+# ================= AI =================
 def ai_chat(messages):
     try:
         r = requests.post(MISTRAL_URL, headers=HEADERS,
@@ -75,18 +56,14 @@ def ai_chat(messages):
     except:
         return "AI failed."
 
-# ========================
-# CONTENT
-# ========================
+# ================= CONTENT =================
 def generate_content(keyword, history=[]):
-    messages = [{"role":"system","content":"You are SEO blog writer"}] + history + [
-        {"role":"user","content":f"Write detailed blog on {keyword}"}
+    messages = [{"role":"system","content":"You are smart marketing AI assistant"}] + history + [
+        {"role":"user","content":f"Create detailed blog + marketing content on {keyword}"}
     ]
     return ai_chat(messages)
 
-# ========================
-# BLOG
-# ========================
+# ================= BLOG =================
 def publish_blog(title, content):
     slug = str(uuid.uuid4())[:8]
     cursor.execute("INSERT INTO posts VALUES (?,?,?,?,?)",
@@ -94,42 +71,42 @@ def publish_blog(title, content):
     conn.commit()
     return f"{BACKEND_URL}/blog/{slug}"
 
-# ========================
-# COMMAND (MAIN)
-# ========================
+# ================= GET CAMPAIGNS =================
+@app.route("/campaigns")
+def campaigns():
+    rows = cursor.execute("SELECT id, niche FROM campaigns ORDER BY created_at DESC").fetchall()
+    return jsonify({
+        "campaigns":[{"id":r[0], "niche":r[1]} for r in rows]
+    })
+
+# ================= COMMAND =================
 @app.route("/command", methods=["POST"])
 def command():
     data = request.json
     query = data.get("command")
 
     campaign_id = str(uuid.uuid4())
+    keyword = f"best {query}"
 
-    keywords, source = keyword_engine(query)
-    content = generate_content(keywords[0])
-    blog_url = publish_blog(keywords[0], content)
+    content = generate_content(keyword)
+    blog_url = publish_blog(keyword, content)
 
-    # 🔥 conversation start
     conversation = [
         {"role":"user","content":query},
         {"role":"assistant","content":f"{content}\n\nBlog: {blog_url}"}
     ]
 
     cursor.execute("INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)",
-        (campaign_id, query, ",".join(keywords), content, blog_url,
-         source, json.dumps(conversation), datetime.utcnow().isoformat()))
+        (campaign_id, query, keyword, content, blog_url,
+         "AI", json.dumps(conversation), datetime.utcnow().isoformat()))
     conn.commit()
 
     return jsonify({
-        "status":"success",
         "campaign_id":campaign_id,
-        "keywords":keywords,
-        "blog_url":blog_url,
         "conversation":conversation
     })
 
-# ========================
-# CHAT CONTINUE
-# ========================
+# ================= CHAT CONTINUE =================
 @app.route("/chat/<campaign_id>", methods=["POST"])
 def chat(campaign_id):
     data = request.json
@@ -137,12 +114,18 @@ def chat(campaign_id):
 
     row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
     if not row:
-        return jsonify({"status":"error"})
+        return jsonify({"error":"campaign not found"})
 
     conversation = json.loads(row[0])
-
     conversation.append({"role":"user","content":message})
-    ai_response = ai_chat(conversation)
+
+    # SMART AI BEHAVIOR
+    system_prompt = {
+        "role":"system",
+        "content":"You are intelligent AI. If user asks to generate blog/content then generate it. Otherwise chat normally."
+    }
+
+    ai_response = ai_chat([system_prompt] + conversation)
     conversation.append({"role":"assistant","content":ai_response})
 
     cursor.execute("UPDATE campaigns SET conversation=? WHERE id=?",
@@ -151,17 +134,13 @@ def chat(campaign_id):
 
     return jsonify({"conversation":conversation})
 
-# ========================
-# GET CHAT
-# ========================
+# ================= GET CAMPAIGN =================
 @app.route("/campaign/<campaign_id>")
 def get_campaign(campaign_id):
     row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
     return jsonify({"conversation": json.loads(row[0]) if row else []})
 
-# ========================
-# BLOG VIEW (FIXED)
-# ========================
+# ================= BLOG VIEW =================
 @app.route("/blog/<slug>")
 def blog(slug):
     post = cursor.execute("SELECT title, content FROM posts WHERE slug=?", (slug,)).fetchone()
@@ -174,7 +153,7 @@ def blog(slug):
     <div style='white-space:pre-wrap'>{post[1]}</div>
     """
 
-# ========================
+# ================= HOME =================
 @app.route("/")
 def home():
-    return jsonify({"status":"AI marketing system running"})
+    return jsonify({"status":"AI system running"})
