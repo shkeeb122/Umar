@@ -63,106 +63,156 @@ def ai_chat(messages):
     try:
         r = requests.post(MISTRAL_URL, headers=HEADERS,
             json={"model":MODEL_NAME,"messages":messages}, timeout=40)
-        return r.json()["choices"][0]["message"]["content"]
-    except:
-        return "AI failed."
+
+        if r.status_code != 200:
+            return f"AI API Error: {r.status_code}"
+
+        data = r.json()
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "AI empty response")
+
+    except Exception as e:
+        return f"AI failed: {str(e)}"
 
 # ================= CONTENT GENERATION =================
 def generate_content(keyword, history=[]):
-    messages = [{"role":"system","content":"You are a smart marketing AI assistant. Respond with human-like tone, understand user intent, and generate tasks when asked."}] + history + [
+    messages = [
+        {"role":"system","content":"You are a smart marketing AI assistant. Respond clearly in structured format with headings, bullet points and clean paragraphs."}
+    ] + history + [
         {"role":"user","content":f"Create detailed blog + marketing content on {keyword}"}
     ]
     return ai_chat(messages)
 
 # ================= BLOG PUBLISH =================
 def publish_blog(title, content):
-    slug = str(uuid.uuid4())[:8]
-    cursor.execute("INSERT INTO posts VALUES (?,?,?,?,?)",
-        (str(uuid.uuid4()), title, content, slug, datetime.utcnow().isoformat()))
-    conn.commit()
-    return f"{BACKEND_URL}/blog/{slug}"
+    try:
+        slug = str(uuid.uuid4())[:8]
+
+        cursor.execute("INSERT INTO posts VALUES (?,?,?,?,?)",
+            (str(uuid.uuid4()), title, content, slug, datetime.utcnow().isoformat()))
+        conn.commit()
+
+        return f"{BACKEND_URL}/blog/{slug}"
+
+    except Exception as e:
+        return f"Blog error: {str(e)}"
 
 # ================= GET ALL CAMPAIGNS =================
 @app.route("/campaigns")
 def campaigns():
-    rows = cursor.execute("SELECT id, niche FROM campaigns ORDER BY created_at DESC").fetchall()
-    return jsonify({"campaigns":[{"id":r[0], "niche":r[1]} for r in rows]})
+    try:
+        rows = cursor.execute("SELECT id, niche FROM campaigns ORDER BY created_at DESC").fetchall()
+        return jsonify({"campaigns":[{"id":r[0], "niche":r[1]} for r in rows]})
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 # ================= COMMAND EXECUTION =================
-@app.route("/command", methods=["POST"])
+@app.route("/command", methods=["GET","POST"])
 def command():
-    data = request.json
-    query = data.get("command")
 
-    campaign_id = str(uuid.uuid4())
-    keyword = f"best {query}"
+    if request.method == "GET":
+        return jsonify({"message":"Command endpoint working. Use POST to execute."})
 
-    content = generate_content(keyword)
-    blog_url = publish_blog(keyword, content)
+    try:
+        data = request.json or {}
+        query = data.get("command")
 
-    conversation = [
-        {"role":"user","content":query},
-        {"role":"assistant","content":f"{content}\n\nBlog: {blog_url}"}
-    ]
+        if not query:
+            return jsonify({"error":"No command provided"})
 
-    # Save campaign + conversation history
-    cursor.execute("INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)",
-        (campaign_id, query, keyword, content, blog_url, "AI", json.dumps(conversation), datetime.utcnow().isoformat()))
-    conn.commit()
+        campaign_id = str(uuid.uuid4())
+        keyword = f"best {query}"
 
-    # Log task
-    cursor.execute("INSERT INTO task_history VALUES (?,?,?,?,?,?)",
-        (str(uuid.uuid4()), campaign_id, "Content Generation", "Completed", f"Blog generated: {blog_url}", datetime.utcnow().isoformat()))
-    conn.commit()
+        content = generate_content(keyword)
+        blog_url = publish_blog(keyword, content)
 
-    return jsonify({"campaign_id":campaign_id, "conversation":conversation})
+        conversation = [
+            {"role":"user","content":query},
+            {"role":"assistant","content":f"{content}\n\nBlog: {blog_url}"}
+        ]
 
-# ================= CHAT CONTINUE (HUMAN-LIKE & SMART) =================
-@app.route("/chat/<campaign_id>", methods=["POST"])
+        cursor.execute("INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)",
+            (campaign_id, query, keyword, content, blog_url, "AI", json.dumps(conversation), datetime.utcnow().isoformat()))
+        conn.commit()
+
+        cursor.execute("INSERT INTO task_history VALUES (?,?,?,?,?,?)",
+            (str(uuid.uuid4()), campaign_id, "Content Generation", "Completed", f"Blog generated: {blog_url}", datetime.utcnow().isoformat()))
+        conn.commit()
+
+        return jsonify({"campaign_id":campaign_id, "conversation":conversation})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# ================= CHAT =================
+@app.route("/chat/<campaign_id>", methods=["GET","POST"])
 def chat(campaign_id):
-    data = request.json
-    message = data.get("message")
 
-    row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
-    if not row:
-        return jsonify({"error":"campaign not found"})
+    if request.method == "GET":
+        return jsonify({"message":"Chat endpoint working. Use POST."})
 
-    conversation = json.loads(row[0])
-    conversation.append({"role":"user","content":message})
+    try:
+        data = request.json or {}
+        message = data.get("message")
 
-    system_prompt = {
-        "role":"system",
-        "content":"You are an intelligent AI assistant. Understand user commands, tone, and intent. If user asks for task (blog, marketing, video), execute it. Otherwise chat normally. Respond in human-like tone."
-    }
+        if not message:
+            return jsonify({"error":"Empty message"})
 
-    ai_response = ai_chat([system_prompt] + conversation)
-    conversation.append({"role":"assistant","content":ai_response})
+        row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
+        if not row:
+            return jsonify({"error":"campaign not found"})
 
-    cursor.execute("UPDATE campaigns SET conversation=? WHERE id=?", (json.dumps(conversation), campaign_id))
-    conn.commit()
+        conversation = json.loads(row[0])
+        conversation.append({"role":"user","content":message})
 
-    # Log conversation step
-    cursor.execute("INSERT INTO task_history VALUES (?,?,?,?,?,?)",
-        (str(uuid.uuid4()), campaign_id, "Chat Response", "Completed", f"User: {message}\nAssistant: {ai_response[:100]}...", datetime.utcnow().isoformat()))
-    conn.commit()
+        system_prompt = {
+            "role":"system",
+            "content":"You are an intelligent AI assistant. Respond in clear structured format with headings, bullet points and proper spacing."
+        }
 
-    return jsonify({"conversation":conversation})
+        ai_response = ai_chat([system_prompt] + conversation)
+        conversation.append({"role":"assistant","content":ai_response})
 
-# ================= GET CAMPAIGN HISTORY =================
+        cursor.execute("UPDATE campaigns SET conversation=? WHERE id=?", (json.dumps(conversation), campaign_id))
+        conn.commit()
+
+        cursor.execute("INSERT INTO task_history VALUES (?,?,?,?,?,?)",
+            (str(uuid.uuid4()), campaign_id, "Chat Response", "Completed", f"User: {message}", datetime.utcnow().isoformat()))
+        conn.commit()
+
+        return jsonify({"conversation":conversation})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# ================= GET CAMPAIGN =================
 @app.route("/campaign/<campaign_id>")
 def get_campaign(campaign_id):
-    row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
-    return jsonify({"conversation": json.loads(row[0]) if row else []})
+    try:
+        row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
+        return jsonify({"conversation": json.loads(row[0]) if row else []})
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
-# ================= BLOG VIEW =================
+# ================= BLOG =================
 @app.route("/blog/<slug>")
 def blog(slug):
-    post = cursor.execute("SELECT title, content FROM posts WHERE slug=?", (slug,)).fetchone()
-    if not post:
-        return "Blog not found"
-    return f"<h1>{post[0]}</h1><hr><div style='white-space:pre-wrap'>{post[1]}</div>"
+    try:
+        post = cursor.execute("SELECT title, content FROM posts WHERE slug=?", (slug,)).fetchone()
+        if not post:
+            return "Blog not found"
+        return f"<h1>{post[0]}</h1><hr><div style='white-space:pre-wrap'>{post[1]}</div>"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# ================= HEALTH CHECK =================
+@app.route("/health")
+def health():
+    return jsonify({"status":"ok"})
 
 # ================= HOME =================
 @app.route("/")
 def home():
-    return jsonify({"status":"Next-Level AI system running", "features":"Chat History, Human-like behavior, Command Execution, Task Logging, Smart AI"})
+    return jsonify({
+        "status":"Next-Level AI system running",
+        "features":"Chat History, Human-like behavior, Command Execution, Task Logging, Smart AI"
+    })
