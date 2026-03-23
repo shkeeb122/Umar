@@ -23,21 +23,52 @@ conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
 # Campaigns
-cursor.execute("""CREATE TABLE IF NOT EXISTS campaigns(
-id TEXT PRIMARY KEY, niche TEXT, keywords TEXT, content TEXT, blog_url TEXT,
-source TEXT, conversation TEXT, created_at TEXT)""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS campaigns(
+    id TEXT PRIMARY KEY,
+    niche TEXT,
+    keywords TEXT,
+    content TEXT,
+    blog_url TEXT,
+    source TEXT,
+    conversation TEXT,
+    created_at TEXT
+)
+""")
 
 # Posts
-cursor.execute("""CREATE TABLE IF NOT EXISTS posts(
-id TEXT PRIMARY KEY, title TEXT, content TEXT, slug TEXT, created_at TEXT)""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS posts(
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    content TEXT,
+    slug TEXT,
+    created_at TEXT
+)
+""")
 
 # Task history
-cursor.execute("""CREATE TABLE IF NOT EXISTS task_history(
-id TEXT PRIMARY KEY, campaign_id TEXT, step_name TEXT, status TEXT, note TEXT, timestamp TEXT)""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS task_history(
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT,
+    step_name TEXT,
+    status TEXT,
+    note TEXT,
+    timestamp TEXT
+)
+""")
 
-# Memory table
-cursor.execute("""CREATE TABLE IF NOT EXISTS memory(
-id TEXT PRIMARY KEY, user_input TEXT, ai_response TEXT, tags TEXT, created_at TEXT)""")
+# Memory
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS memory(
+    id TEXT PRIMARY KEY,
+    user_input TEXT,
+    ai_response TEXT,
+    tags TEXT,
+    created_at TEXT
+)
+""")
 
 conn.commit()
 
@@ -45,7 +76,6 @@ conn.commit()
 def format_text(text):
     return text.replace("\n", "<br>")
 
-# ================= INTENT =================
 def detect_intent(text):
     t = text.lower()
     if "blog" in t:
@@ -73,10 +103,12 @@ def ai_chat(messages):
     except Exception:
         return "AI error, please retry."
 
-# ================= MEMORY FUNCTIONS =================
+# ================= MEMORY =================
 def save_memory(user_input, ai_response, tag="general"):
-    cursor.execute("INSERT INTO memory VALUES (?,?,?,?,?)",
-                   (str(uuid.uuid4()), user_input, ai_response, tag, datetime.utcnow().isoformat()))
+    cursor.execute(
+        "INSERT INTO memory VALUES (?,?,?,?,?)",
+        (str(uuid.uuid4()), user_input, ai_response, tag, datetime.utcnow().isoformat())
+    )
     conn.commit()
 
 def get_memory(limit=10):
@@ -100,7 +132,7 @@ def generate_content(keyword):
         {"role": "user", "content": f"Write blog on {keyword}"}
     ])
 
-# ================= BLOG FUNCTIONS =================
+# ================= BLOG =================
 def publish_blog(title, content):
     slug = str(uuid.uuid4())[:8]
     cursor.execute("INSERT INTO posts VALUES (?,?,?,?,?)",
@@ -140,7 +172,9 @@ def chat(campaign_id):
         row = cursor.execute("SELECT conversation FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         conversation = json.loads(row[0]) if row else []
 
-        conversation.append({"role": "user", "content": message})
+        if message.strip():
+            conversation.append({"role": "user", "content": message})
+
         memory_context = get_memory(limit=12)
         conversation = (memory_context + conversation)[-15:]
 
@@ -191,6 +225,11 @@ def memory_by_id(memory_id):
     ]
     return jsonify({"conversation": conversation})
 
+@app.route("/memory/delete", methods=["POST"])
+def memory_delete_endpoint():
+    delete_memory()
+    return jsonify({"status": "Memory cleared"})
+
 # ================= BLOG PAGE =================
 @app.route("/blog/<slug>")
 def blog(slug):
@@ -204,7 +243,7 @@ def blog(slug):
 def home():
     return jsonify({"status": "ULTRA AI RUNNING"})
 
-# ================= DEPLOY-READY RUN =================
+# ================= RUN =================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # 🔥 Use platform port
-    app.run(host="0.0.0.0", port=port, debug=True)  # 🔥 Host 0.0.0.0 for public access
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
