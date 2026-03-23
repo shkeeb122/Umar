@@ -204,5 +204,7 @@ def blog(slug):
 def home():
     return jsonify({"status": "ULTRA AI RUNNING"})
 
+# ================= DEPLOY-READY RUN =================
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))  # 🔥 Use platform port
+    app.run(host="0.0.0.0", port=port, debug=True)  # 🔥 Host 0.0.0.0 for public access
