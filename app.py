@@ -1,7 +1,8 @@
 import os, requests, sqlite3, uuid, json, re
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS campaigns(
     created_at TEXT,
     updated_at TEXT,
     message_count INTEGER DEFAULT 0,
-    question_count INTEGER DEFAULT 0
+    question_count INTEGER DEFAULT 0,
+    last_topic TEXT
 )
 """)
 
@@ -70,7 +72,7 @@ CREATE TABLE IF NOT EXISTS generated_content(
 )
 """)
 
-# Chat Sessions for delete/restore
+# Deleted Chats
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS deleted_chats(
     id TEXT PRIMARY KEY,
@@ -85,34 +87,33 @@ conn.commit()
 # ================= HELPER FUNCTIONS =================
 
 def is_question(text):
-    """Check if a message is a question"""
+    """Check if message is a question"""
     text_lower = text.lower()
-    # Question marks
     if "?" in text_lower:
         return True
-    # Hindi question words
-    question_words = ["kya", "kaise", "kyu", "kahan", "kab", "kaun", "batao", "pooch", "sawal"]
+    question_words = ["kya", "kaise", "kyu", "kahan", "kab", "kaun", "batao", "pooch", "sawal", "what", "how", "why", "where", "when"]
     for word in question_words:
         if word in text_lower:
             return True
     return False
 
 def format_response(text):
-    """Format response with clickable links"""
+    """Format with clickable links - IMPORTANT for frontend"""
     if not text:
         return ""
     
-    # Convert URLs to clickable links
+    # First, extract any blog URLs and make them beautiful buttons
     url_pattern = r'(https?://[^\s<>]+?)(?=[\s<>]|$)'
     
-    def replace_url(match):
+    def make_clickable(match):
         url = match.group(1)
         if '/blog/' in url:
-            return f'<a href="{url}" target="_blank" style="color: #3b82f6; background: #eff6ff; padding: 6px 14px; border-radius: 20px; text-decoration: none; display: inline-block; margin: 4px 0;">📝 Read Blog →</a>'
+            # Extract blog title from URL if possible
+            return f'<div class="blog-card"><a href="{url}" target="_blank" class="blog-btn">📖 Read Full Blog →</a><span class="blog-url">{url}</span></div>'
         else:
-            return f'<a href="{url}" target="_blank" style="color: #3b82f6; text-decoration: underline;">🔗 {url}</a>'
+            return f'<a href="{url}" target="_blank" class="link">🔗 {url}</a>'
     
-    text = re.sub(url_pattern, replace_url, text)
+    text = re.sub(url_pattern, make_clickable, text)
     
     # Simple markdown
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
@@ -123,7 +124,7 @@ def format_response(text):
     return text
 
 def get_all_user_messages(campaign_id):
-    """Get all user messages from campaign"""
+    """Get all user messages"""
     rows = cursor.execute("""
         SELECT content, is_question FROM messages 
         WHERE campaign_id = ? AND role = 'user'
@@ -132,15 +133,15 @@ def get_all_user_messages(campaign_id):
     return [{"content": r[0], "is_question": r[1]} for r in rows]
 
 def count_questions(campaign_id):
-    """Count total questions from user"""
+    """Count total questions"""
     row = cursor.execute("""
         SELECT COUNT(*) FROM messages 
         WHERE campaign_id = ? AND role = 'user' AND is_question = 1
     """, (campaign_id,)).fetchone()
     return row[0] if row else 0
 
-def get_full_history(campaign_id, limit=50):
-    """Get recent history for AI context"""
+def get_full_history(campaign_id, limit=30):
+    """Get history for AI context"""
     rows = cursor.execute("""
         SELECT role, content FROM messages 
         WHERE campaign_id = ? 
@@ -148,10 +149,19 @@ def get_full_history(campaign_id, limit=50):
     """, (campaign_id, limit)).fetchall()
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
+def get_all_history(campaign_id):
+    """Get ALL history for counting"""
+    rows = cursor.execute("""
+        SELECT role, content, is_question FROM messages 
+        WHERE campaign_id = ? 
+        ORDER BY timestamp ASC
+    """, (campaign_id,)).fetchall()
+    return [{"role": r[0], "content": r[1], "is_question": r[2]} for r in rows]
+
 # ================= AI FUNCTIONS =================
 
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Single AI call"""
+    """Single AI call with streaming support"""
     try:
         payload = {
             "model": MODEL_NAME,
@@ -161,58 +171,67 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
             "top_p": 0.95
         }
         
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=45)
+        start_time = time.time()
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
         
         if r.status_code != 200:
-            return "Server busy. Please try again."
+            return "⚠️ Server busy. Please try again."
         
         data = r.json()
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
+        print(f"AI Response time: {time.time() - start_time:.2f}s")
         return response.strip() if response else "I'm not sure how to respond."
         
     except Exception as e:
         print(f"AI Error: {e}")
-        return "Error occurred. Please try again."
+        return "❌ Error occurred. Please try again."
 
-def detect_intent(text):
-    """Fast intent detection"""
+def detect_intent(text, history=None):
+    """Advanced intent detection with context"""
     t = text.lower()
     
     # Question count
-    if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye"]):
+    if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye", "kitne question"]):
         return "count_questions"
     
-    # List all questions
-    if any(w in t for w in ["kaun kaun se sawal", "kya kya sawal", "list questions", "sawal list"]):
+    # List questions
+    if any(w in t for w in ["kaun kaun se sawal", "kya kya sawal", "list questions", "sawal list", "which questions"]):
         return "list_questions"
     
-    # Blog
-    if any(w in t for w in ["blog", "article", "post", "write about"]):
+    # Blog generation
+    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog"]):
         return "blog"
     
     # Follow-up
-    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more"]):
+    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more", "aur details", "aur info"]):
         return "follow_up"
     
-    # Delete/rename
-    if any(w in t for w in ["delete chat", "rename chat"]):
-        return "chat_management"
+    # Recall past
+    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad", "kya tha"]):
+        return "recall"
     
     return "chat"
 
 def generate_blog(topic):
     """Generate blog content"""
-    system = """You are an expert writer. Create a detailed, engaging blog post.
-    Use markdown with headings, bullet points, and emojis."""
+    system = """You are an expert writer. Create a detailed, engaging blog post about: """ + topic + """
     
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"Create a detailed blog post about: {topic}"}
-    ]
-    return ai_chat(messages, temperature=0.8, max_tokens=1800)
+    Format with:
+    - Catchy title with emoji
+    - Introduction
+    - Clear sections with headings
+    - Bullet points where helpful
+    - Strong conclusion
+    - Include a clickable link placeholder at the end
+    
+    Use markdown for formatting."""
+    
+    messages = [{"role": "system", "content": system}]
+    return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
 def publish_blog(title, content):
-    """Publish blog"""
+    """Publish blog and return URL"""
     try:
         slug = re.sub(r'[^a-z0-9]+', '-', title.lower().strip())[:40]
         slug = f"{slug}-{str(uuid.uuid4())[:4]}"
@@ -229,27 +248,36 @@ def publish_blog(title, content):
     except Exception as e:
         return f"Blog error: {e}"
 
-def generate_response(intent, message, history, campaign_id=None):
-    """Generate smart response"""
+def generate_response(intent, message, history, all_history, campaign_id=None):
+    """Generate smart response with full context"""
     
     # ===== COUNT QUESTIONS =====
     if intent == "count_questions":
         total = count_questions(campaign_id)
-        return f"📊 **Aapne ab tak {total} sawal poochhe hain!**\n\nKya main aur koi sawal ka jawab doon? 😊"
+        # Get first question for context
+        questions = [m for m in all_history if m.get("role") == "user" and m.get("is_question")]
+        first_q = questions[0]["content"][:50] if questions else ""
+        
+        return f"""📊 **आपके सवालों की संख्या**
+
+आपने अब तक **{total} सवाल** पूछे हैं!
+
+🔹 पहला सवाल: "{first_q}..."
+
+क्या मैं और किसी सवाल का जवाब दूं? 😊"""
     
     # ===== LIST ALL QUESTIONS =====
     elif intent == "list_questions":
-        user_msgs = get_all_user_messages(campaign_id)
-        questions = [m for m in user_msgs if m["is_question"]]
+        questions = [m for m in all_history if m.get("role") == "user" and m.get("is_question")]
         
         if not questions:
-            return "📝 Aapne abhi tak koi sawal nahi poochha hai! Kuch poochhna chahenge? 😊"
+            return "📝 आपने अभी तक कोई सवाल नहीं पूछा है! कोई सवाल पूछना चाहेंगे? 😊"
         
-        response = "📋 **Aapke pooche gaye sawal (shuru se ab tak):**\n\n"
+        response = "📋 **आपके सारे सवाल (शुरू से अब तक):**\n\n"
         for i, q in enumerate(questions, 1):
-            response += f"{i}. {q['content'][:100]}\n"
+            response += f"{i}. {q['content'][:150]}\n"
         
-        response += f"\n✅ Total: {len(questions)} sawal"
+        response += f"\n✅ **कुल:** {len(questions)} सवाल"
         return response
     
     # ===== GENERATE BLOG =====
@@ -263,40 +291,68 @@ def generate_response(intent, message, history, campaign_id=None):
         """, (str(uuid.uuid4()), campaign_id, "blog", message[:100], url, datetime.utcnow().isoformat()))
         conn.commit()
         
-        return f"{content}\n\n📝 **Blog Published:**\n<a href='{url}' target='_blank' style='color:#3b82f6; background:#eff6ff; padding:8px 16px; border-radius:8px; text-decoration:none; display:inline-block;'>✨ Read Full Blog →</a>"
+        return f"{content}\n\n---\n\n<div class='blog-published'>📝 <strong>ब्लॉग प्रकाशित हो गया है!</strong><br><a href='{url}' target='_blank' class='blog-btn-large'>✨ पूरा ब्लॉग पढ़ें →</a></div>"
     
     # ===== FOLLOW-UP =====
     elif intent == "follow_up":
-        # Get last user message
-        last_user = None
-        for msg in reversed(history):
+        # Find last topic from history
+        last_user_msg = None
+        for msg in reversed(all_history):
             if msg.get("role") == "user":
-                last_user = msg.get("content")
+                last_user_msg = msg.get("content")
                 break
         
-        if last_user:
-            system = """You are a helpful AI. Elaborate on the previous topic.
-            Give more details, examples, and deeper insights. Be conversational."""
+        if last_user_msg:
+            system = """You are a helpful AI. The user wants you to elaborate on the previous topic.
+            Give more details, examples, and deeper insights. Be conversational and engaging.
+            Reference what was discussed before."""
+            
+            context = history[-10:] if len(history) > 10 else history
             
             msgs = [{"role": "system", "content": system}]
-            msgs.extend(history[-8:])
-            msgs.append({"role": "user", "content": f"Previous: {last_user}\nPlease elaborate:"})
+            msgs.extend(context)
+            msgs.append({"role": "user", "content": f"Previous topic was: {last_user_msg}\nNow please elaborate: {message}"})
             
             return ai_chat(msgs, temperature=0.75)
         else:
-            return "I'd be happy to explain more! What would you like to know? 😊"
+            return "मैं और विस्तार से बता सकता हूँ! कृपया बताइए कि आप किस बारे में और जानना चाहते हैं? 😊"
+    
+    # ===== RECALL PAST =====
+    elif intent == "recall":
+        # Find relevant past messages
+        keyword = message.lower().replace("pehle", "").replace("kya", "").replace("tha", "").strip()
+        
+        relevant = []
+        for msg in reversed(all_history[-20:]):
+            if msg.get("role") == "user" and (keyword in msg.get("content", "").lower() or not keyword):
+                relevant.append(msg.get("content"))
+                if len(relevant) >= 3:
+                    break
+        
+        if relevant:
+            response = "📜 **पहले की बातचीत:**\n\n"
+            for i, r in enumerate(relevant, 1):
+                response += f"{i}. {r}\n"
+            return response
+        else:
+            return "😊 मुझे पहले की कोई ऐसी बात याद नहीं आ रही। क्या आप थोड़ा और बता सकते हैं?"
     
     # ===== GENERAL CHAT =====
     else:
-        system = """You are a friendly, helpful AI assistant. You have perfect memory.
+        system = """You are a friendly, helpful AI assistant with perfect memory of this conversation.
+
+IMPORTANT RULES:
+- Be conversational and natural, like ChatGPT
+- Use emojis occasionally 😊 🚀 💡
+- ALWAYS reference previous conversations when relevant
+- If user asks about past, recall accurately
+- Give clear, structured answers
+- Be concise but thorough
+- Use Hindi and English naturally (Hinglish)
+
+You remember everything the user has said in this conversation."""
         
-        Rules:
-        - Be conversational and natural
-        - Use emojis occasionally 😊 🚀 💡
-        - Reference previous conversations
-        - Give clear, structured answers
-        - Remember everything user says"""
-        
+        # Take last 15 messages for context
         context = history[-15:] if len(history) > 15 else history
         
         msgs = [{"role": "system", "content": system}]
@@ -310,15 +366,16 @@ def generate_response(intent, message, history, campaign_id=None):
 @app.route("/")
 def home():
     return jsonify({
-        "status": "AI System Running",
-        "version": "4.0",
+        "status": "AI System Running - ChatGPT Style",
+        "version": "5.0",
         "features": [
-            "Perfect question counter",
+            "Perfect question counter (full history)",
             "Chat delete & restore",
             "Chat rename",
-            "Full memory",
-            "Clickable blogs",
-            "Fast responses"
+            "Full memory (all messages)",
+            "Clickable blog links",
+            "Fast responses",
+            "Context recall"
         ]
     })
 
@@ -328,7 +385,6 @@ def health():
 
 @app.route("/campaigns")
 def campaigns():
-    """Get all active campaigns"""
     try:
         rows = cursor.execute("""
             SELECT id, title, created_at, updated_at, message_count, question_count 
@@ -341,7 +397,7 @@ def campaigns():
             "campaigns": [
                 {
                     "id": r[0],
-                    "title": r[1] or "Chat",
+                    "title": r[1] or "नई चैट",
                     "created_at": r[2],
                     "updated_at": r[3],
                     "messages": r[4] or 0,
@@ -354,14 +410,14 @@ def campaigns():
 
 @app.route("/campaign/<campaign_id>")
 def get_campaign(campaign_id):
-    """Get campaign details"""
     try:
-        history = get_full_history(campaign_id, 100)
+        all_history = get_all_history(campaign_id)
+        history = [{"role": h["role"], "content": h["content"]} for h in all_history]
         row = cursor.execute("SELECT title, question_count FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         
         return jsonify({
             "conversation": history,
-            "title": row[0] if row else "Chat",
+            "title": row[0] if row else "चैट",
             "question_count": row[1] if row else 0,
             "message_count": len(history)
         })
@@ -370,43 +426,36 @@ def get_campaign(campaign_id):
 
 @app.route("/command", methods=["POST"])
 def command():
-    """Start new chat"""
     try:
         data = request.json or {}
         query = data.get("command")
         
         if not query:
-            return jsonify({"error": "No command"}), 400
+            return jsonify({"error": "कोई कमांड नहीं"}), 400
         
         campaign_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         
-        # Detect if it's a question
         is_ques = 1 if is_question(query) else 0
-        
-        # Detect intent
         intent = detect_intent(query)
         
-        # Generate response
-        response = generate_response(intent, query, [], campaign_id)
+        response = generate_response(intent, query, [], [], campaign_id)
         
-        # Store user message
+        # Store messages
         cursor.execute("""
             INSERT INTO messages (id, campaign_id, role, content, is_question, timestamp)
             VALUES (?, ?, 'user', ?, ?, ?)
         """, (str(uuid.uuid4()), campaign_id, query, is_ques, now))
         
-        # Store AI response
         cursor.execute("""
             INSERT INTO messages (id, campaign_id, role, content, is_question, timestamp)
             VALUES (?, ?, 'assistant', ?, 0, ?)
         """, (str(uuid.uuid4()), campaign_id, response, now))
         
-        # Create campaign
         cursor.execute("""
-            INSERT INTO campaigns (id, title, created_at, updated_at, message_count, question_count)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (campaign_id, query[:50], now, now, 2, is_ques))
+            INSERT INTO campaigns (id, title, created_at, updated_at, message_count, question_count, last_topic)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (campaign_id, query[:50], now, now, 2, is_ques, query[:100]))
         conn.commit()
         
         return jsonify({
@@ -420,44 +469,40 @@ def command():
 
 @app.route("/chat/<campaign_id>", methods=["POST"])
 def chat(campaign_id):
-    """Continue chat"""
     try:
         data = request.json or {}
         message = data.get("message")
         
         if not message:
-            return jsonify({"error": "Empty message"}), 400
+            return jsonify({"error": "खाली मैसेज"}), 400
         
-        # Check campaign exists and not deleted
         row = cursor.execute("SELECT id, is_deleted FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         if not row:
-            return jsonify({"error": "Campaign not found"}), 404
+            return jsonify({"error": "चैट नहीं मिली"}), 404
         if row[1] == 1:
-            return jsonify({"error": "Campaign deleted"}), 400
+            return jsonify({"error": "चैट डिलीट हो चुकी है"}), 400
         
         now = datetime.utcnow().isoformat()
-        
-        # Check if it's a question
         is_ques = 1 if is_question(message) else 0
         
-        # Get history for context
-        history = get_full_history(campaign_id, 20)
+        # Get ALL history for accurate counting
+        all_history = get_all_history(campaign_id)
+        history = [{"role": h["role"], "content": h["content"]} for h in all_history[-20:]]
         
-        # Detect intent
-        intent = detect_intent(message)
+        intent = detect_intent(message, history)
         
         # Handle rename/delete commands
-        if message.lower().startswith("rename"):
-            new_name = message.replace("rename", "").strip()
+        if message.lower().startswith("rename "):
+            new_name = message[7:].strip()
             if new_name:
                 cursor.execute("UPDATE campaigns SET title=? WHERE id=?", (new_name, campaign_id))
                 conn.commit()
                 return jsonify({
-                    "response": f"✅ Chat renamed to: **{new_name}**",
+                    "response": f"✅ चैट का नाम बदलकर **{new_name}** कर दिया गया!",
                     "intent": "rename"
                 })
         
-        elif message.lower().startswith("delete"):
+        elif message.lower().strip() == "delete":
             cursor.execute("UPDATE campaigns SET is_deleted=1, updated_at=? WHERE id=?", (now, campaign_id))
             cursor.execute("""
                 INSERT INTO deleted_chats (id, campaign_id, title, deleted_at)
@@ -465,13 +510,13 @@ def chat(campaign_id):
             """, (str(uuid.uuid4()), now, campaign_id))
             conn.commit()
             return jsonify({
-                "response": "🗑️ Chat deleted successfully. Start a new chat to continue!",
+                "response": "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।",
                 "intent": "delete",
                 "deleted": True
             })
         
-        # Generate response
-        response = generate_response(intent, message, history, campaign_id)
+        # Generate response with full context
+        response = generate_response(intent, message, history, all_history, campaign_id)
         
         # Store messages
         cursor.execute("""
@@ -488,9 +533,9 @@ def chat(campaign_id):
         new_question_count = count_questions(campaign_id)
         cursor.execute("""
             UPDATE campaigns 
-            SET updated_at = ?, message_count = message_count + 2, question_count = ?
+            SET updated_at = ?, message_count = message_count + 2, question_count = ?, last_topic = ?
             WHERE id = ?
-        """, (now, new_question_count, campaign_id))
+        """, (now, new_question_count, message[:100], campaign_id))
         conn.commit()
         
         return jsonify({
@@ -505,36 +550,28 @@ def chat(campaign_id):
 
 @app.route("/campaign/rename/<campaign_id>", methods=["POST"])
 def rename_campaign(campaign_id):
-    """Rename campaign API"""
     try:
         data = request.json or {}
         new_name = data.get("name")
-        
         if not new_name:
-            return jsonify({"error": "No name"}), 400
-        
+            return jsonify({"error": "नाम चाहिए"}), 400
         cursor.execute("UPDATE campaigns SET title=? WHERE id=?", (new_name, campaign_id))
         conn.commit()
-        
         return jsonify({"status": "renamed", "new_name": new_name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/campaign/delete/<campaign_id>", methods=["DELETE"])
 def delete_campaign(campaign_id):
-    """Soft delete campaign"""
     try:
         now = datetime.utcnow().isoformat()
         cursor.execute("UPDATE campaigns SET is_deleted=1, updated_at=? WHERE id=?", (now, campaign_id))
-        
-        # Store in deleted chats
         row = cursor.execute("SELECT title FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         if row:
             cursor.execute("""
                 INSERT INTO deleted_chats (id, campaign_id, title, deleted_at)
                 VALUES (?, ?, ?, ?)
             """, (str(uuid.uuid4()), campaign_id, row[0], now))
-        
         conn.commit()
         return jsonify({"status": "deleted"})
     except Exception as e:
@@ -542,7 +579,6 @@ def delete_campaign(campaign_id):
 
 @app.route("/campaign/restore/<campaign_id>", methods=["POST"])
 def restore_campaign(campaign_id):
-    """Restore deleted campaign"""
     try:
         cursor.execute("UPDATE campaigns SET is_deleted=0 WHERE id=?", (campaign_id,))
         cursor.execute("DELETE FROM deleted_chats WHERE campaign_id=?", (campaign_id,))
@@ -553,7 +589,6 @@ def restore_campaign(campaign_id):
 
 @app.route("/blog/<slug>")
 def blog(slug):
-    """View blog"""
     try:
         post = cursor.execute(
             "SELECT title, content, created_at FROM posts WHERE slug=?", 
@@ -605,13 +640,33 @@ def blog(slug):
                     line-height: 1.8;
                     color: #333;
                 }}
+                .blog-content h1, .blog-content h2, .blog-content h3 {{
+                    margin: 20px 0 10px;
+                    color: #667eea;
+                }}
                 .blog-content a {{
                     color: #667eea;
                     text-decoration: none;
                 }}
+                .blog-content pre {{
+                    background: #f4f4f4;
+                    padding: 15px;
+                    border-radius: 8px;
+                    overflow-x: auto;
+                }}
+                .blog-btn {{
+                    display: inline-block;
+                    background: #667eea;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    margin: 10px 0;
+                }}
                 @media (max-width: 600px) {{
                     .blog-header {{ padding: 30px; }}
                     .blog-content {{ padding: 20px; }}
+                    .blog-header h1 {{ font-size: 1.5rem; }}
                 }}
             </style>
         </head>
@@ -623,6 +678,10 @@ def blog(slug):
                 </div>
                 <div class="blog-content">
                     {post[1]}
+                </div>
+                <div style="padding: 20px; text-align: center; border-top: 1px solid #eee;">
+                    <a href="{BACKEND_URL}" class="blog-btn">🏠 होम पेज</a>
+                    <a href="https://twitter.com/intent/tweet?text={post[0]}&url={BACKEND_URL}/blog/{slug}" class="blog-btn" style="background:#1DA1F2;">🐦 शेयर करें</a>
                 </div>
             </div>
         </body>
