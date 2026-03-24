@@ -1,5 +1,5 @@
 import os, requests, sqlite3, uuid, json, re
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -19,12 +19,12 @@ HEADERS = {
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 
-# ================= DATABASE (Simple aur Fast) =================
+# ================= DATABASE (Simple & Fast) =================
 
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Simple Campaigns Table
+# Campaigns Table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS campaigns(
     id TEXT PRIMARY KEY,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS campaigns(
 )
 """)
 
-# Messages Table - Fast lookup ke liye
+# Messages Table - Full history store
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS messages(
     id TEXT PRIMARY KEY,
@@ -72,46 +72,6 @@ CREATE TABLE IF NOT EXISTS generated_content(
 
 conn.commit()
 
-# ================= FAST MEMORY SYSTEM =================
-
-class FastMemory:
-    """Fast aur simple memory system"""
-    
-    def __init__(self, campaign_id):
-        self.campaign_id = campaign_id
-    
-    def add_message(self, role, content):
-        """Fast message store"""
-        msg_id = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO messages (id, campaign_id, role, content, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        """, (msg_id, self.campaign_id, role, content, datetime.utcnow().isoformat()))
-        
-        cursor.execute("""
-            UPDATE campaigns SET message_count = message_count + 1, updated_at = ?
-            WHERE id = ?
-        """, (datetime.utcnow().isoformat(), self.campaign_id))
-        conn.commit()
-    
-    def get_recent(self, limit=20):
-        """Fast recent messages fetch"""
-        rows = cursor.execute("""
-            SELECT role, content FROM messages 
-            WHERE campaign_id = ? 
-            ORDER BY timestamp DESC LIMIT ?
-        """, (self.campaign_id, limit)).fetchall()
-        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-    
-    def get_all_messages(self):
-        """Full history"""
-        rows = cursor.execute("""
-            SELECT role, content FROM messages 
-            WHERE campaign_id = ? 
-            ORDER BY timestamp ASC
-        """, (self.campaign_id,)).fetchall()
-        return [{"role": r[0], "content": r[1]} for r in rows]
-
 # ================= HELPER FUNCTIONS =================
 
 def format_response(text):
@@ -140,16 +100,27 @@ def format_response(text):
     return text
 
 def count_questions(conversation):
-    """Count user questions"""
+    """Count user questions from full history"""
     count = 0
     for msg in conversation:
         if msg.get("role") == "user":
             content = msg.get("content", "").lower()
-            if "?" in content or any(w in content for w in ["kya", "kaise", "kyu", "batao"]):
+            if "?" in content:
+                count += 1
+            elif any(w in content for w in ["kya", "kaise", "kyu", "kahan", "batao", "pooch"]):
                 count += 1
     return count
 
-# ================= AI FUNCTIONS (Optimized) =================
+def get_full_history(campaign_id):
+    """Get complete conversation history"""
+    rows = cursor.execute("""
+        SELECT role, content FROM messages 
+        WHERE campaign_id = ? 
+        ORDER BY timestamp ASC
+    """, (campaign_id,)).fetchall()
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+# ================= AI FUNCTION (Single Call) =================
 
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
     """Single AI call - fast"""
@@ -162,10 +133,10 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
             "top_p": 0.95
         }
         
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=45)
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
         
         if r.status_code != 200:
-            return "Sorry, server busy. Please try again."
+            return "Server busy. Please try again."
         
         data = r.json()
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -175,26 +146,42 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         print(f"AI Error: {e}")
         return "Error occurred. Please try again."
 
+# ================= INTENT DETECTION =================
+
 def detect_intent(text):
     """Fast intent detection"""
     t = text.lower()
     
-    if any(w in t for w in ["blog", "article", "post", "write"]):
-        return "blog"
-    elif any(w in t for w in ["keyword", "seo", "rank"]):
-        return "keyword"
-    elif any(w in t for w in ["kitne sawal", "total sawal", "how many question"]):
+    # Question count
+    if any(w in t for w in ["kitne sawal", "total sawal", "how many question"]):
         return "count_questions"
-    elif any(w in t for w in ["aur batao", "tell more", "elaborate"]):
+    
+    # Blog
+    if any(w in t for w in ["blog", "article", "post", "write about"]):
+        return "blog"
+    
+    # Follow-up
+    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more"]):
         return "follow_up"
-    elif any(w in t for w in ["idea", "suggest", "topic"]):
+    
+    # Keyword/SEO
+    if any(w in t for w in ["keyword", "seo", "rank"]):
+        return "keyword"
+    
+    # Ideas
+    if any(w in t for w in ["idea", "suggest", "topic"]):
         return "idea"
-    else:
-        return "chat"
+    
+    return "chat"
+
+# ================= BLOG FUNCTIONS =================
 
 def generate_blog(topic):
-    """Generate blog - single AI call"""
-    system = "You are an expert writer. Create a detailed, engaging blog post. Use markdown with headings, bullets, and emojis."
+    """Generate blog content"""
+    system = """You are an expert writer. Create a detailed, engaging blog post.
+    Use markdown with headings, bullet points, and emojis.
+    Make it informative and easy to read."""
+    
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": f"Create a detailed blog post about: {topic}"}
@@ -202,7 +189,7 @@ def generate_blog(topic):
     return ai_chat(messages, temperature=0.8, max_tokens=1800)
 
 def publish_blog(title, content):
-    """Publish blog"""
+    """Publish blog with clickable URL"""
     try:
         slug = re.sub(r'[^a-z0-9]+', '-', title.lower().strip())[:40]
         slug = f"{slug}-{str(uuid.uuid4())[:4]}"
@@ -219,36 +206,33 @@ def publish_blog(title, content):
     except Exception as e:
         return f"Blog error: {e}"
 
+# ================= SMART RESPONSE (ChatGPT Style) =================
+
 def generate_response(intent, message, history, campaign_id=None):
-    """Single response generation - optimized"""
+    """Generate response like ChatGPT - with full context memory"""
     
+    # ===== COUNT QUESTIONS =====
     if intent == "count_questions":
         total = count_questions(history)
-        return f"📊 **Aapne ab tak {total} sawal poochhe hain!**\n\nKya aur koi sawaal hai? 😊"
+        return f"📊 **Aapne ab tak {total} sawal poochhe hain!**\n\nKya main kisi aur sawal ka jawab doon? 😊"
     
+    # ===== GENERATE BLOG =====
     elif intent == "blog":
         content = generate_blog(message)
         url = publish_blog(message, content)
         
-        # Store generated content
+        # Store in generated content
         cursor.execute("""
             INSERT INTO generated_content (id, campaign_id, content_type, title, url, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (str(uuid.uuid4()), campaign_id, "blog", message[:100], url, datetime.utcnow().isoformat()))
         conn.commit()
         
-        return f"{content}\n\n📝 **Blog Ready:**\n<a href='{url}' target='_blank' style='color:#3b82f6; background:#eff6ff; padding:8px 16px; border-radius:8px; text-decoration:none; display:inline-block;'>✨ Read Full Blog →</a>"
+        return f"{content}\n\n📝 **Blog Published:**\n<a href='{url}' target='_blank' style='color:#3b82f6; background:#eff6ff; padding:8px 16px; border-radius:8px; text-decoration:none; display:inline-block;'>✨ Read Full Blog →</a>"
     
-    elif intent == "keyword":
-        system = "You are an SEO expert. Give keywords and strategy."
-        msgs = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Give SEO keywords for: {message}"}
-        ]
-        return ai_chat(msgs, temperature=0.7)
-    
+    # ===== FOLLOW-UP (Context Maintain) =====
     elif intent == "follow_up":
-        # Get last topic
+        # Get last user question from history
         last_user = None
         for msg in reversed(history):
             if msg.get("role") == "user":
@@ -256,32 +240,52 @@ def generate_response(intent, message, history, campaign_id=None):
                 break
         
         if last_user:
-            system = "Elaborate on the previous topic with more insights."
-            msgs = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Previous: {last_user}\nUser says: {message}\nElaborate:"}
-            ]
+            system = """You are a helpful AI. The user wants you to elaborate on the previous topic.
+            Give more details, examples, and deeper insights. Be conversational and engaging."""
+            
+            msgs = [{"role": "system", "content": system}]
+            msgs.extend(history[-8:])  # Last 8 messages for context
+            msgs.append({"role": "user", "content": f"Previous topic: {last_user}\nUser says: {message}\nPlease elaborate:"})
+            
             return ai_chat(msgs, temperature=0.75)
         else:
-            return "I'd be happy to explain more! What specifically would you like to know?"
+            return "I'd be happy to explain more! What specifically would you like to know? 😊"
     
-    elif intent == "idea":
-        system = "Generate creative content ideas."
+    # ===== KEYWORD RESEARCH =====
+    elif intent == "keyword":
+        system = "You are an SEO expert. Give relevant keywords, search volume, and strategy."
         msgs = [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"Give content ideas for: {message}"}
+            {"role": "user", "content": f"Give SEO keywords and strategy for: {message}"}
+        ]
+        return ai_chat(msgs, temperature=0.7)
+    
+    # ===== IDEAS GENERATION =====
+    elif intent == "idea":
+        system = "You are a creative strategist. Generate innovative content ideas with angles and target audience."
+        msgs = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Generate content ideas for: {message}"}
         ]
         return ai_chat(msgs, temperature=0.85)
     
-    else:  # General chat
-        system = """You are a friendly AI assistant. Be:
-        - Conversational and natural
-        - Use emojis occasionally 😊
-        - Give clear, helpful answers
-        - Reference previous conversation when relevant"""
+    # ===== GENERAL CHAT (With Full Context) =====
+    else:
+        system = """You are a friendly, helpful AI assistant. You have perfect memory of this conversation.
         
-        # Take last 10 messages for context
-        context = history[-10:] if len(history) > 10 else history
+        Guidelines:
+        - Be conversational and natural, like ChatGPT
+        - Use emojis occasionally 😊 🚀 💡
+        - Reference previous conversations when relevant
+        - If user asks "pehle kya hua tha", recall past messages
+        - Give clear, structured answers
+        - Ask clarifying questions if needed
+        - Be concise but thorough
+        
+        Remember everything the user has said in this conversation."""
+        
+        # Take last 15 messages for context (enough for continuity)
+        context = history[-15:] if len(history) > 15 else history
         
         msgs = [{"role": "system", "content": system}]
         msgs.extend(context)
@@ -294,19 +298,25 @@ def generate_response(intent, message, history, campaign_id=None):
 @app.route("/")
 def home():
     return jsonify({
-        "status": "AI System Running",
+        "status": "AI System Running - ChatGPT Style",
         "version": "3.0",
-        "features": ["Chat", "Blog", "Keywords", "Memory"],
-        "health": "ok"
+        "features": [
+            "Full conversation memory",
+            "Context-aware responses",
+            "Blog generation",
+            "Keyword research",
+            "Question counter",
+            "Clickable blog links"
+        ]
     })
 
 @app.route("/health")
 def health():
-    """Simple health check - fast response"""
+    """Fast health check"""
     return jsonify({
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
-        "database": "connected"
+        "memory": "active"
     })
 
 @app.route("/campaigns")
@@ -331,6 +341,20 @@ def campaigns():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/campaign/<campaign_id>")
+def get_campaign(campaign_id):
+    try:
+        history = get_full_history(campaign_id)
+        row = cursor.execute("SELECT title FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
+        
+        return jsonify({
+            "conversation": history,
+            "title": row[0] if row else "Chat",
+            "count": len(history)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/command", methods=["POST"])
 def command():
     try:
@@ -341,22 +365,26 @@ def command():
             return jsonify({"error": "No command"}), 400
         
         campaign_id = str(uuid.uuid4())
-        memory = FastMemory(campaign_id)
+        now = datetime.utcnow().isoformat()
         
         # Detect intent
         intent = detect_intent(query)
         
-        # Store user message
-        memory.add_message("user", query)
-        
-        # Generate response
+        # Generate response (empty history for new chat)
         response = generate_response(intent, query, [], campaign_id)
         
-        # Store AI response
-        memory.add_message("assistant", response)
+        # Store messages
+        cursor.execute("""
+            INSERT INTO messages (id, campaign_id, role, content, timestamp)
+            VALUES (?, ?, 'user', ?, ?)
+        """, (str(uuid.uuid4()), campaign_id, query, now))
+        
+        cursor.execute("""
+            INSERT INTO messages (id, campaign_id, role, content, timestamp)
+            VALUES (?, ?, 'assistant', ?, ?)
+        """, (str(uuid.uuid4()), campaign_id, response, now))
         
         # Create campaign
-        now = datetime.utcnow().isoformat()
         cursor.execute("""
             INSERT INTO campaigns (id, title, created_at, updated_at, message_count)
             VALUES (?, ?, ?, ?, ?)
@@ -381,29 +409,42 @@ def chat(campaign_id):
         if not message:
             return jsonify({"error": "Empty message"}), 400
         
-        # Check campaign
+        # Check campaign exists
         row = cursor.execute("SELECT id FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         if not row:
             return jsonify({"error": "Campaign not found"}), 404
         
-        memory = FastMemory(campaign_id)
-        
-        # Get recent history (last 15 messages for context)
-        history = memory.get_recent(15)
-        
-        # Store user message
-        memory.add_message("user", message)
+        # Get full history for context
+        history = get_full_history(campaign_id)
         
         # Detect intent
         intent = detect_intent(message)
         
-        # Generate response
+        # Generate response with full history
         response = generate_response(intent, message, history, campaign_id)
         
-        # Store AI response
-        memory.add_message("assistant", response)
+        # Store messages
+        now = datetime.utcnow().isoformat()
         
-        # Get message count
+        cursor.execute("""
+            INSERT INTO messages (id, campaign_id, role, content, timestamp)
+            VALUES (?, ?, 'user', ?, ?)
+        """, (str(uuid.uuid4()), campaign_id, message, now))
+        
+        cursor.execute("""
+            INSERT INTO messages (id, campaign_id, role, content, timestamp)
+            VALUES (?, ?, 'assistant', ?, ?)
+        """, (str(uuid.uuid4()), campaign_id, response, now))
+        
+        # Update campaign
+        cursor.execute("""
+            UPDATE campaigns 
+            SET updated_at = ?, message_count = message_count + 2
+            WHERE id = ?
+        """, (now, campaign_id))
+        conn.commit()
+        
+        # Get updated message count
         count_row = cursor.execute("SELECT message_count FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
         msg_count = count_row[0] if count_row else 0
         
@@ -413,16 +454,6 @@ def chat(campaign_id):
             "message_count": msg_count
         })
         
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/campaign/<campaign_id>/history")
-def get_history(campaign_id):
-    """Get full conversation"""
-    try:
-        memory = FastMemory(campaign_id)
-        history = memory.get_all_messages()
-        return jsonify({"history": history, "count": len(history)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -503,6 +534,7 @@ def blog(slug):
                 @media (max-width: 600px) {{
                     .blog-header {{ padding: 30px; }}
                     .blog-content {{ padding: 20px; }}
+                    .blog-header h1 {{ font-size: 1.5rem; }}
                 }}
             </style>
         </head>
