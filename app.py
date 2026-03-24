@@ -24,7 +24,7 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 conn = sqlite3.connect("ai_system.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Enhanced campaigns table with more fields
+# Campaigns Table - Compatible with old data
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS campaigns(
     id TEXT PRIMARY KEY,
@@ -40,6 +40,20 @@ CREATE TABLE IF NOT EXISTS campaigns(
     summary TEXT
 )
 """)
+
+# Add missing columns if they don't exist
+try:
+    cursor.execute("ALTER TABLE campaigns ADD COLUMN updated_at TEXT")
+except:
+    pass
+try:
+    cursor.execute("ALTER TABLE campaigns ADD COLUMN message_count INTEGER DEFAULT 0")
+except:
+    pass
+try:
+    cursor.execute("ALTER TABLE campaigns ADD COLUMN summary TEXT")
+except:
+    pass
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS posts(
@@ -62,7 +76,6 @@ CREATE TABLE IF NOT EXISTS task_history(
 )
 """)
 
-# New table for conversation context
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS conversation_context(
     campaign_id TEXT PRIMARY KEY,
@@ -79,6 +92,9 @@ conn.commit()
 
 def format_response(text):
     """Format response with proper HTML and markdown"""
+    if not text:
+        return ""
+    
     # Convert markdown to HTML
     text = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
@@ -93,108 +109,7 @@ def format_response(text):
     
     return text
 
-def truncate_conversation(conversation, max_tokens=3000):
-    """Intelligently truncate conversation while keeping context"""
-    if len(conversation) <= 20:
-        return conversation
-    
-    # Keep system message, first 3 exchanges, last 10 exchanges
-    system_msgs = [msg for msg in conversation if msg.get("role") == "system"]
-    user_msgs = [msg for msg in conversation if msg.get("role") != "system"]
-    
-    if len(user_msgs) <= 15:
-        return conversation
-    
-    # Keep first 3 and last 10
-    kept = user_msgs[:3] + user_msgs[-10:]
-    
-    # Add system messages back
-    return system_msgs + kept
-
-def generate_summary(conversation):
-    """Generate a summary of the conversation for context"""
-    if not conversation or len(conversation) < 2:
-        return "New conversation"
-    
-    # Extract key topics from last few messages
-    user_messages = [msg["content"] for msg in conversation if msg["role"] == "user"][-5:]
-    
-    prompt = [{
-        "role": "user",
-        "content": f"Summarize this conversation in 1 short sentence (max 15 words). Focus on the main topic. Conversation: {' | '.join(user_messages)}"
-    }]
-    
-    try:
-        summary = ai_chat(prompt)
-        return summary[:150]  # Limit length
-    except:
-        return user_messages[0][:50] + "..." if user_messages else "Conversation"
-
-def get_suggestions(context):
-    """Generate contextual suggestions based on conversation"""
-    prompt = [{
-        "role": "system",
-        "content": "You are a helpful AI. Based on the conversation, suggest 3 relevant follow-up questions or actions. Return ONLY as JSON array like: ['question1', 'question2', 'question3']"
-    }, {
-        "role": "user",
-        "content": f"Based on this conversation context: {context}\nSuggest 3 relevant follow-up questions:"
-    }]
-    
-    try:
-        response = ai_chat(prompt)
-        # Try to parse JSON response
-        suggestions = json.loads(response)
-        if isinstance(suggestions, list) and len(suggestions) >= 3:
-            return suggestions[:3]
-    except:
-        pass
-    
-    # Default suggestions if JSON parsing fails
-    return [
-        "Can you explain more about that?",
-        "What are the key benefits?",
-        "Do you have any examples?"
-    ]
-
-# ================= ENHANCED INTENT DETECTION =================
-
-def detect_intent(text, conversation_context=None):
-    """Advanced intent detection with context awareness"""
-    t = text.lower()
-    
-    # Check for follow-up questions
-    follow_up_patterns = ['tell me more', 'explain', 'elaborate', 'go deeper', 'more about']
-    if any(pattern in t for pattern in follow_up_patterns) and conversation_context:
-        return "follow_up"
-    
-    # Blog-related intents
-    blog_patterns = ['blog', 'article', 'post', 'write about', 'create content']
-    if any(pattern in t for pattern in blog_patterns):
-        return "blog"
-    
-    # SEO/Keyword intents
-    seo_patterns = ['keyword', 'seo', 'rank', 'optimize', 'search terms']
-    if any(pattern in t for pattern in seo_patterns):
-        return "keyword"
-    
-    # Idea generation
-    idea_patterns = ['idea', 'suggest', 'topic', 'what should', 'how about']
-    if any(pattern in t for pattern in idea_patterns):
-        return "idea"
-    
-    # Analysis intents
-    analysis_patterns = ['analyze', 'compare', 'difference', 'vs', 'versus']
-    if any(pattern in t for pattern in analysis_patterns):
-        return "analysis"
-    
-    # How-to intents
-    howto_patterns = ['how to', 'guide', 'tutorial', 'steps', 'way to']
-    if any(pattern in t for pattern in howto_patterns):
-        return "how_to"
-    
-    return "chat"
-
-# ================= ENHANCED AI CHAT =================
+# ================= AI CHAT FUNCTION (DEFINED FIRST) =================
 
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
     """Enhanced AI chat with better parameters"""
@@ -207,149 +122,222 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
             "top_p": 0.95
         }
         
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=45)
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=60)
         
         if r.status_code != 200:
-            return "I'm experiencing high demand. Please try again in a moment."
+            return "Server busy, please try again."
         
         data = r.json()
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         
-        # Clean up response
-        response = response.strip()
-        
-        return response if response else "I'm not sure how to respond to that."
+        return response.strip() if response else "I'm not sure how to respond."
 
     except requests.exceptions.Timeout:
-        return "The request is taking longer than expected. Please try again."
+        return "Request timeout. Please try again."
     except Exception as e:
         print(f"AI Error: {str(e)}")
-        return "I encountered an error. Could you please rephrase your question?"
+        return "I encountered an error. Please rephrase your question."
 
-# ================= ENHANCED CONTENT GENERATION =================
+# ================= SUMMARY GENERATOR =================
 
-def generate_content(topic, conversation_history=None):
-    """Generate better content with context"""
-    system_prompt = """You are an expert content writer. Create engaging, well-structured content with:
-    - A compelling title
-    - Introduction that hooks the reader
-    - Clear sections with subheadings
-    - Key points in bullet format where appropriate
-    - Practical examples and insights
-    - Strong conclusion with takeaways
+def generate_summary(conversation):
+    """Generate summary without circular import"""
+    if not conversation or len(conversation) < 2:
+        return "New conversation"
     
-    Use markdown formatting for better readability."""
+    try:
+        user_messages = []
+        for msg in conversation:
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                user_messages.append(msg.get("content", ""))
+        
+        recent_msgs = user_messages[-3:] if user_messages else []
+        if not recent_msgs:
+            return "Conversation started"
+        
+        summary_prompt = [{
+            "role": "user",
+            "content": f"Summarize in 1 short sentence (max 10 words): {' | '.join(recent_msgs)}"
+        }]
+        
+        summary = ai_chat(summary_prompt, temperature=0.5, max_tokens=50)
+        return summary[:100]
+    except:
+        return recent_msgs[0][:50] + "..." if recent_msgs else "Conversation"
+
+# ================= SUGGESTIONS =================
+
+def get_suggestions(context):
+    """Generate contextual suggestions"""
+    try:
+        prompt = [{
+            "role": "user",
+            "content": f"Based on: {context}\nSuggest 3 short follow-up questions. Return as JSON array."
+        }]
+        
+        response = ai_chat(prompt, temperature=0.7, max_tokens=150)
+        
+        # Try to parse JSON
+        import ast
+        suggestions = ast.literal_eval(response) if response.startswith('[') else None
+        
+        if isinstance(suggestions, list) and len(suggestions) >= 3:
+            return suggestions[:3]
+    except:
+        pass
+    
+    return [
+        "Tell me more about that",
+        "What are the key benefits?",
+        "Can you give an example?"
+    ]
+
+# ================= INTENT DETECTION =================
+
+def detect_intent(text, context=None):
+    """Advanced intent detection"""
+    t = text.lower()
+    
+    # Follow-up detection
+    follow_up = ['tell me more', 'explain', 'elaborate', 'go deeper', 'more about', 'aur batao']
+    if any(word in t for word in follow_up):
+        return "follow_up"
+    
+    # Blog detection
+    blog_words = ['blog', 'article', 'post', 'write', 'create content']
+    if any(word in t for word in blog_words):
+        return "blog"
+    
+    # SEO/Keyword
+    seo_words = ['keyword', 'seo', 'rank', 'optimize', 'search']
+    if any(word in t for word in seo_words):
+        return "keyword"
+    
+    # Ideas
+    idea_words = ['idea', 'suggest', 'topic', 'what should', 'how about']
+    if any(word in t for word in idea_words):
+        return "idea"
+    
+    # Analysis
+    analysis_words = ['analyze', 'compare', 'difference', 'vs', 'versus']
+    if any(word in t for word in analysis_words):
+        return "analysis"
+    
+    # How-to
+    howto_words = ['how to', 'guide', 'tutorial', 'steps', 'way to']
+    if any(word in t for word in howto_words):
+        return "how_to"
+    
+    return "chat"
+
+# ================= CONTENT GENERATION =================
+
+def generate_content(topic, history=None):
+    """Generate blog content"""
+    system_prompt = """You are an expert content writer. Create engaging content with:
+    - Compelling title
+    - Introduction hook
+    - Clear sections with headings
+    - Key points in bullets
+    - Practical examples
+    - Strong conclusion"""
     
     messages = [{"role": "system", "content": system_prompt}]
     
-    if conversation_history:
-        # Add relevant context from conversation
-        context = [msg for msg in conversation_history[-6:] if msg["role"] == "user"]
-        if context:
-            messages.extend(context)
+    if history:
+        messages.extend(history[-4:] if len(history) > 4 else history)
     
     messages.append({"role": "user", "content": f"Create a comprehensive blog post about: {topic}"})
     
     return ai_chat(messages, temperature=0.8, max_tokens=1500)
 
-# ================= SMART RESPONSE GENERATION =================
+# ================= SMART RESPONSE =================
 
-def generate_smart_response(intent, message, conversation_history, campaign_id=None):
-    """Generate intelligent response based on intent and context"""
+def generate_smart_response(intent, message, history, campaign_id=None):
+    """Generate intelligent response based on intent"""
     
-    # Get conversation context for better responses
+    # Get context if available
     context = ""
     if campaign_id:
-        context_row = cursor.execute(
-            "SELECT last_topic, user_preferences, key_points FROM conversation_context WHERE campaign_id=?", 
-            (campaign_id,)
-        ).fetchone()
-        if context_row:
-            context = f"Previous topic: {context_row[0] or 'Unknown'}\nUser preferences: {context_row[1] or 'None'}"
+        try:
+            ctx_row = cursor.execute(
+                "SELECT last_topic FROM conversation_context WHERE campaign_id=?", 
+                (campaign_id,)
+            ).fetchone()
+            if ctx_row and ctx_row[0]:
+                context = f"Previous topic: {ctx_row[0]}"
+        except:
+            pass
     
     if intent == "follow_up":
-        system_prompt = """You are a helpful AI assistant. The user wants you to elaborate on the previous topic. 
-        Provide deeper insights, more examples, and expand on key points. Be thorough but conversational."""
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(conversation_history[-8:])  # Keep last 8 messages for context
-        return ai_chat(messages, temperature=0.75)
+        system = "Elaborate on the previous topic. Give deeper insights, more examples, and expand key points."
+        msgs = [{"role": "system", "content": system}]
+        msgs.extend(history[-6:] if len(history) > 6 else history)
+        return ai_chat(msgs, temperature=0.75)
     
     elif intent == "blog":
-        content = generate_content(message, conversation_history)
+        content = generate_content(message, history)
         blog_url = publish_blog(message, content)
         return f"{content}\n\n📝 **Blog Published**: {blog_url}"
     
     elif intent == "keyword":
-        system_prompt = "You are an SEO expert. Provide relevant keywords, search volume insights, and keyword strategy."
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Give me SEO keywords and strategy for: {message}"}
+        system = "You are an SEO expert. Provide relevant keywords and strategy."
+        msgs = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Give SEO keywords and strategy for: {message}"}
         ]
-        return ai_chat(messages, temperature=0.7)
+        return ai_chat(msgs, temperature=0.7)
     
     elif intent == "idea":
-        system_prompt = "You are a creative strategist. Generate innovative content ideas with angles, target audience, and potential impact."
-        messages = [
-            {"role": "system", "content": system_prompt},
+        system = "Generate innovative content ideas with angles and target audience."
+        msgs = [
+            {"role": "system", "content": system},
             {"role": "user", "content": f"Generate content ideas for: {message}"}
         ]
-        return ai_chat(messages, temperature=0.85)
+        return ai_chat(msgs, temperature=0.85)
     
     elif intent == "analysis":
-        system_prompt = "You are an analytical expert. Provide detailed comparison, pros/cons, and actionable insights."
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Analyze this: {message}"}
+        system = "Provide detailed analysis, comparison, and actionable insights."
+        msgs = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Analyze: {message}"}
         ]
-        return ai_chat(messages, temperature=0.7)
+        return ai_chat(msgs, temperature=0.7)
     
     elif intent == "how_to":
-        system_prompt = """You are a practical guide. Provide step-by-step instructions with:
-        - Clear numbered steps
-        - Tools/resources needed
-        - Common pitfalls to avoid
-        - Pro tips for better results"""
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
+        system = "Provide step-by-step instructions with clear steps and tips."
+        msgs = [
+            {"role": "system", "content": system},
             {"role": "user", "content": f"Guide me on: {message}"}
         ]
-        return ai_chat(messages, temperature=0.65)
+        return ai_chat(msgs, temperature=0.65)
     
     else:  # General chat
-        system_prompt = """You are a friendly, knowledgeable AI assistant. Be:
+        system = """You are a friendly, knowledgeable AI assistant. Be:
         - Conversational and natural
         - Helpful and informative
         - Concise but thorough
-        - Engaging and personable
+        - Engaging with emojis occasionally
         
-        Use emojis occasionally to make responses lively.
-        Ask clarifying questions when needed.
-        Provide examples to illustrate points.
-        Keep responses well-structured but not robotic."""
+        Provide examples and ask clarifying questions when needed."""
         
-        # Add context if available
         if context:
-            system_prompt += f"\n\nContext from previous conversation: {context}"
+            system += f"\n\nContext: {context}"
         
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(conversation_history[-12:])  # Keep last 12 messages for context
-        messages.append({"role": "user", "content": message})
+        msgs = [{"role": "system", "content": system}]
+        msgs.extend(history[-10:] if len(history) > 10 else history)
+        msgs.append({"role": "user", "content": message})
         
-        return ai_chat(messages, temperature=0.7)
+        return ai_chat(msgs, temperature=0.7)
 
 # ================= PUBLISH BLOG =================
 
 def publish_blog(title, content):
-    """Enhanced blog publishing with better formatting"""
+    """Publish blog to database"""
     try:
-        # Create SEO-friendly slug
-        slug = re.sub(r'[^a-z0-9]+', '-', title.lower().strip())
-        slug = slug[:50]  # Limit length
+        slug = re.sub(r'[^a-z0-9]+', '-', title.lower().strip())[:40]
         slug = f"{slug}-{str(uuid.uuid4())[:4]}"
         
-        # Format blog content
         formatted_content = format_response(content)
         
         cursor.execute(
@@ -359,30 +347,27 @@ def publish_blog(title, content):
         conn.commit()
         
         return f"{BACKEND_URL}/blog/{slug}"
-        
     except Exception as e:
-        print(f"Blog publish error: {str(e)}")
-        return f"Blog creation error: {str(e)}"
+        print(f"Blog error: {e}")
+        return f"Blog error: {str(e)}"
 
 # ================= ROUTES =================
 
 @app.route("/")
 def home():
     return jsonify({
-        "status": "ULTRA AI RUNNING - Enhanced Version",
+        "status": "ULTRA AI RUNNING - Fixed Version",
+        "message": "System is working perfectly!",
         "features": [
             "Human-like conversations",
-            "Unlimited chat memory",
+            "Unlimited chat memory", 
             "Smart context retention",
             "Intent-based responses",
-            "Follow-up understanding",
-            "Content generation",
-            "SEO optimization",
-            "Blog publishing",
-            "Conversation suggestions",
-            "Context-aware AI"
+            "Blog generation",
+            "Keyword research",
+            "Suggestions system"
         ],
-        "version": "2.0"
+        "version": "3.0"
     })
 
 @app.route("/health")
@@ -397,7 +382,7 @@ def health():
 def campaigns():
     try:
         rows = cursor.execute(
-            "SELECT id, niche, created_at, updated_at, message_count FROM campaigns ORDER BY updated_at DESC"
+            "SELECT id, niche, created_at, updated_at, message_count FROM campaigns ORDER BY updated_at DESC LIMIT 50"
         ).fetchall()
         
         return jsonify({
@@ -426,9 +411,7 @@ def get_campaign(campaign_id):
             return jsonify({"error": "Campaign not found"}), 404
         
         conversation = json.loads(row[0]) if row[0] else []
-        
-        # Generate suggestions based on conversation
-        suggestions = get_suggestions(str(conversation[-5:]) if conversation else "")
+        suggestions = get_suggestions(str(conversation[-3:]) if conversation else "")
         
         return jsonify({
             "conversation": conversation,
@@ -451,45 +434,31 @@ def command():
             return jsonify({"error": "No command provided"}), 400
         
         campaign_id = str(uuid.uuid4())
-        
-        # Detect intent for initial command
         intent = detect_intent(query)
         
-        # Generate appropriate response
         if intent == "blog":
             content = generate_content(query)
             blog_url = publish_blog(query, content)
-            final_response = f"{content}\n\n📝 **Blog Published**: {blog_url}"
+            final_response = f"{content}\n\n📝 **Blog**: {blog_url}"
         else:
-            messages = [{"role": "user", "content": query}]
-            final_response = generate_smart_response("chat", query, messages, None)
+            final_response = generate_smart_response("chat", query, [], None)
         
         conversation = [
-            {"role": "user", "content": query, "timestamp": datetime.utcnow().isoformat()},
-            {"role": "assistant", "content": final_response, "timestamp": datetime.utcnow().isoformat()}
+            {"role": "user", "content": query},
+            {"role": "assistant", "content": final_response}
         ]
         
-        # Generate summary
-        summary = generate_summary(conversation)
+        now = datetime.utcnow().isoformat()
         
         cursor.execute("""
-            INSERT INTO campaigns (id, niche, conversation, created_at, updated_at, message_count, summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            campaign_id, 
-            query[:50], 
-            json.dumps(conversation), 
-            datetime.utcnow().isoformat(),
-            datetime.utcnow().isoformat(),
-            len(conversation),
-            summary
-        ))
+            INSERT INTO campaigns (id, niche, conversation, created_at, updated_at, message_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (campaign_id, query[:50], json.dumps(conversation), now, now, len(conversation)))
         
-        # Initialize context
         cursor.execute("""
-            INSERT INTO conversation_context (campaign_id, last_topic, updated_at)
+            INSERT OR REPLACE INTO conversation_context (campaign_id, last_topic, updated_at)
             VALUES (?, ?, ?)
-        """, (campaign_id, query[:100], datetime.utcnow().isoformat()))
+        """, (campaign_id, query[:100], now))
         
         conn.commit()
         
@@ -511,9 +480,8 @@ def chat(campaign_id):
         if not message:
             return jsonify({"error": "Empty message"}), 400
         
-        # Get campaign data
         row = cursor.execute(
-            "SELECT conversation, niche, summary FROM campaigns WHERE id=?", 
+            "SELECT conversation FROM campaigns WHERE id=?", 
             (campaign_id,)
         ).fetchone()
         
@@ -521,56 +489,39 @@ def chat(campaign_id):
             return jsonify({"error": "Campaign not found"}), 404
         
         conversation = json.loads(row[0]) if row[0] else []
-        summary = row[2] or ""
         
-        # Add user message with timestamp
-        conversation.append({
-            "role": "user", 
-            "content": message,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        # Add user message
+        conversation.append({"role": "user", "content": message})
         
-        # Detect intent with context
+        # Detect intent
         intent = detect_intent(message, conversation)
         
-        # Generate smart response
+        # Generate response
         ai_response = generate_smart_response(intent, message, conversation, campaign_id)
         
-        # Add AI response with timestamp
-        conversation.append({
-            "role": "assistant", 
-            "content": ai_response,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        # Add AI response
+        conversation.append({"role": "assistant", "content": ai_response})
         
-        # Intelligent truncation for long conversations
-        if len(conversation) > 50:
-            conversation = truncate_conversation(conversation)
+        # Limit conversation length (keep last 40 messages)
+        if len(conversation) > 40:
+            conversation = conversation[-40:]
         
         # Update context
-        last_topic = message[:100]
         cursor.execute("""
             INSERT OR REPLACE INTO conversation_context (campaign_id, last_topic, updated_at)
             VALUES (?, ?, ?)
-        """, (campaign_id, last_topic, datetime.utcnow().isoformat()))
+        """, (campaign_id, message[:100], datetime.utcnow().isoformat()))
         
         # Update campaign
-        summary = generate_summary(conversation)
         cursor.execute("""
             UPDATE campaigns 
-            SET conversation=?, updated_at=?, message_count=?, summary=?
+            SET conversation=?, updated_at=?, message_count=?
             WHERE id=?
-        """, (
-            json.dumps(conversation),
-            datetime.utcnow().isoformat(),
-            len(conversation),
-            summary,
-            campaign_id
-        ))
+        """, (json.dumps(conversation), datetime.utcnow().isoformat(), len(conversation), campaign_id))
         conn.commit()
         
-        # Generate suggestions for next interaction
-        suggestions = get_suggestions(f"User asked: {message}\nAssistant responded: {ai_response[:200]}")
+        # Generate suggestions
+        suggestions = get_suggestions(f"User: {message}\nAI: {ai_response[:150]}")
         
         return jsonify({
             "conversation": conversation,
@@ -619,7 +570,7 @@ def blog(slug):
         ).fetchone()
         
         if not post:
-            return "<h1>Blog not found</h1><p>The requested blog post does not exist.</p>", 404
+            return "<h1>Blog not found</h1>", 404
         
         return f"""
         <!DOCTYPE html>
@@ -629,100 +580,80 @@ def blog(slug):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{post[0]} - AI Blog</title>
             <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                }}
+                .blog-container {{
                     max-width: 800px;
                     margin: 0 auto;
-                    padding: 20px;
-                    line-height: 1.6;
-                    background: #f5f5f5;
-                    color: #333;
-                }}
-                .blog-post {{
                     background: white;
+                    border-radius: 20px;
+                    overflow: hidden;
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                }}
+                .blog-header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
                     padding: 40px;
-                    border-radius: 12px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    text-align: center;
                 }}
-                h1 {{
-                    color: #4f46e5;
-                    margin-bottom: 20px;
+                .blog-header h1 {{
+                    font-size: 2rem;
+                    margin-bottom: 10px;
                 }}
-                .date {{
-                    color: #666;
-                    margin-bottom: 30px;
+                .blog-date {{
+                    opacity: 0.9;
                     font-size: 14px;
                 }}
-                .content {{
-                    font-size: 16px;
+                .blog-content {{
+                    padding: 40px;
+                    line-height: 1.8;
+                    color: #333;
                 }}
-                .content pre {{
+                .blog-content h1, .blog-content h2, .blog-content h3 {{
+                    margin: 20px 0 10px;
+                    color: #667eea;
+                }}
+                .blog-content p {{
+                    margin-bottom: 15px;
+                }}
+                .blog-content pre {{
                     background: #f4f4f4;
                     padding: 15px;
                     border-radius: 8px;
                     overflow-x: auto;
                 }}
-                .content code {{
+                .blog-content code {{
                     background: #f4f4f4;
                     padding: 2px 6px;
                     border-radius: 4px;
                 }}
                 @media (max-width: 600px) {{
-                    .blog-post {{
-                        padding: 20px;
-                    }}
-                    body {{
-                        padding: 10px;
-                    }}
+                    .blog-header {{ padding: 30px; }}
+                    .blog-content {{ padding: 20px; }}
+                    .blog-header h1 {{ font-size: 1.5rem; }}
                 }}
             </style>
         </head>
         <body>
-            <div class="blog-post">
-                <h1>{post[0]}</h1>
-                <div class="date">Published: {post[2]}</div>
-                <div class="content">{post[1]}</div>
+            <div class="blog-container">
+                <div class="blog-header">
+                    <h1>{post[0]}</h1>
+                    <div class="blog-date">📅 {post[2]}</div>
+                </div>
+                <div class="blog-content">
+                    {post[1]}
+                </div>
             </div>
         </body>
         </html>
         """
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
-
-@app.route("/campaign/suggestions/<campaign_id>", methods=["GET"])
-def get_suggestions_for_campaign(campaign_id):
-    """Get suggestions for continuing a conversation"""
-    try:
-        row = cursor.execute(
-            "SELECT conversation FROM campaigns WHERE id=?", 
-            (campaign_id,)
-        ).fetchone()
-        
-        if not row:
-            return jsonify({"error": "Campaign not found"}), 404
-        
-        conversation = json.loads(row[0]) if row[0] else []
-        
-        # Get last few exchanges for context
-        context = str(conversation[-4:]) if conversation else ""
-        suggestions = get_suggestions(context)
-        
-        return jsonify({"suggestions": suggestions})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/campaign/clear/<campaign_id>", methods=["POST"])
-def clear_conversation(campaign_id):
-    """Clear conversation but keep campaign"""
-    try:
-        cursor.execute(
-            "UPDATE campaigns SET conversation=?, updated_at=?, message_count=? WHERE id=?",
-            (json.dumps([]), datetime.utcnow().isoformat(), 0, campaign_id)
-        )
-        conn.commit()
-        return jsonify({"status": "cleared"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
