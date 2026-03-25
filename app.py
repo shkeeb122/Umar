@@ -1,4 +1,4 @@
-import os, requests, sqlite3, uuid, json, re
+ import os, requests, sqlite3, uuid, json, re
 from datetime import datetime
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
@@ -98,28 +98,58 @@ def is_question(text):
     return False
 
 def format_response(text):
-    """Format with clickable links - IMPORTANT for frontend"""
+    """Format with clickable links - FIXED: Returns proper HTML that frontend will render"""
     if not text:
         return ""
     
-    # First, extract any blog URLs and make them beautiful buttons
-    url_pattern = r'(https?://[^\s<>]+?)(?=[\s<>]|$)'
-    
-    def make_clickable(match):
+    # First handle blog URLs specially - make them beautiful clickable cards
+    # Match blog URLs from our system
+    def replace_blog_url(match):
         url = match.group(1)
-        if '/blog/' in url:
-            # Extract blog title from URL if possible
-            return f'<div class="blog-card"><a href="{url}" target="_blank" class="blog-btn">📖 Read Full Blog →</a><span class="blog-url">{url}</span></div>'
-        else:
-            return f'<a href="{url}" target="_blank" class="link">🔗 {url}</a>'
+        # Extract slug or title from URL
+        slug_match = re.search(r'/blog/([^/?]+)', url)
+        if slug_match:
+            return f'<div class="blog-card"><a href="{url}" target="_blank" rel="noopener noreferrer" class="blog-btn">📖 पूरा ब्लॉग पढ़ें →</a><div class="blog-url">{url}</div></div>'
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer" class="link">🔗 {url}</a>'
     
-    text = re.sub(url_pattern, make_clickable, text)
+    # Match blog URLs
+    blog_pattern = r'(https?://[^\s<>]+?/blog/[^\s<>]+?)(?=[\s<>]|$)'
+    text = re.sub(blog_pattern, replace_blog_url, text)
     
-    # Simple markdown
+    # Match regular URLs (non-blog)
+    def replace_regular_url(match):
+        url = match.group(1)
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer" class="link">🔗 {url}</a>'
+    
+    url_pattern = r'(https?://[^\s<>]+?)(?=[\s<>]|$)'
+    # But avoid double-processing blog URLs that were already handled
+    temp_placeholder = "___BLOG_URL_PLACEHOLDER___"
+    text = text.replace('<div class="blog-card">', temp_placeholder)
+    text = re.sub(url_pattern, replace_regular_url, text)
+    text = text.replace(temp_placeholder, '<div class="blog-card">')
+    
+    # Handle blog button HTML properly
+    text = re.sub(r'<div class="blog-btn-large">', '<div class="blog-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">', text)
+    
+    # Markdown style formatting
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', text)
     text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
-    text = text.replace("\n", "<br>")
+    text = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', text, flags=re.MULTILINE)
+    
+    # Convert newlines to <br> but preserve existing HTML
+    lines = text.split('\n')
+    result = []
+    in_html = False
+    for line in lines:
+        if '<' in line and '>' in line and not line.strip().startswith('<'):
+            # Mixed content - handle carefully
+            result.append(line)
+        else:
+            result.append(line)
+    text = '<br>'.join(result)
     
     return text
 
@@ -200,7 +230,7 @@ def detect_intent(text, history=None):
         return "list_questions"
     
     # Blog generation
-    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog"]):
+    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog", "blog banao"]):
         return "blog"
     
     # Follow-up
@@ -214,39 +244,48 @@ def detect_intent(text, history=None):
     return "chat"
 
 def generate_blog(topic):
-    """Generate blog content"""
+    """Generate blog content with proper formatting"""
     system = """You are an expert writer. Create a detailed, engaging blog post about: """ + topic + """
     
     Format with:
-    - Catchy title with emoji
-    - Introduction
-    - Clear sections with headings
-    - Bullet points where helpful
+    - Catchy title with emoji at beginning
+    - Introduction paragraph
+    - Clear sections with headings (use ## for subheadings)
+    - Bullet points where helpful using *
     - Strong conclusion
-    - Include a clickable link placeholder at the end
+    - Keep the content engaging and informative
     
-    Use markdown for formatting."""
+    Use markdown formatting (**, *, etc)."""
     
     messages = [{"role": "system", "content": system}]
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
 def publish_blog(title, content):
-    """Publish blog and return URL"""
+    """Publish blog and return URL with proper HTML formatting"""
     try:
+        # Create a clean slug
         slug = re.sub(r'[^a-z0-9]+', '-', title.lower().strip())[:40]
-        slug = f"{slug}-{str(uuid.uuid4())[:4]}"
+        slug = f"{slug}-{str(uuid.uuid4())[:5]}"
         
-        formatted = format_response(content)
+        # Format the content for the blog page
+        formatted_content = content
+        # Convert markdown to HTML for blog display
+        formatted_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted_content)
+        formatted_content = re.sub(r'\*(.*?)\*', r'<em>\1</em>', formatted_content)
+        formatted_content = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', formatted_content, flags=re.MULTILINE)
+        formatted_content = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', formatted_content, flags=re.MULTILINE)
+        formatted_content = formatted_content.replace('\n', '<br>')
         
         cursor.execute("""
             INSERT INTO posts (id, title, content, slug, created_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (str(uuid.uuid4()), title[:200], formatted, slug, datetime.utcnow().isoformat()))
+        """, (str(uuid.uuid4()), title[:200], formatted_content, slug, datetime.utcnow().isoformat()))
         conn.commit()
         
         return f"{BACKEND_URL}/blog/{slug}"
     except Exception as e:
-        return f"Blog error: {e}"
+        print(f"Blog publish error: {e}")
+        return f"{BACKEND_URL}/blog/error"
 
 def generate_response(intent, message, history, all_history, campaign_id=None):
     """Generate smart response with full context"""
@@ -282,16 +321,44 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ===== GENERATE BLOG =====
     elif intent == "blog":
-        content = generate_blog(message)
-        url = publish_blog(message, content)
+        # Extract topic from message
+        topic = message
+        topic = re.sub(r'(blog|banao|generate|write|make|create|likh|ब्लॉग|बनाओ|लिखो)', '', topic, flags=re.IGNORECASE).strip()
+        if not topic:
+            topic = "technology and innovation"
+        
+        content = generate_blog(topic)
+        
+        # Extract title from content (first line or first heading)
+        title_match = re.search(r'^#+\s*(.*?)$', content, re.MULTILINE)
+        if title_match:
+            title = title_match.group(1).strip()
+        else:
+            title = topic[:80]
+        
+        # Clean title from emojis for URL
+        clean_title = re.sub(r'[^\w\s]', '', title)[:60]
+        
+        url = publish_blog(clean_title, content)
         
         cursor.execute("""
             INSERT INTO generated_content (id, campaign_id, content_type, title, url, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (str(uuid.uuid4()), campaign_id, "blog", message[:100], url, datetime.utcnow().isoformat()))
+        """, (str(uuid.uuid4()), campaign_id, "blog", clean_title[:100], url, datetime.utcnow().isoformat()))
         conn.commit()
         
-        return f"{content}\n\n---\n\n<div class='blog-published'>📝 <strong>ब्लॉग प्रकाशित हो गया है!</strong><br><a href='{url}' target='_blank' class='blog-btn-large'>✨ पूरा ब्लॉग पढ़ें →</a></div>"
+        # Return response with clickable blog link
+        return f"""{content}
+
+---
+
+<div class="blog-published" style="background: linear-gradient(135deg, #10b98120, #10b98110); border-radius: 16px; padding: 20px; text-align: center; margin-top: 20px; border: 1px solid #10b98140;">
+    📝 <strong style="font-size: 18px;">✨ ब्लॉग प्रकाशित हो गया है! ✨</strong><br><br>
+    <a href="{url}" target="_blank" rel="noopener noreferrer" class="blog-btn-large" style="display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 30px; text-decoration: none; font-weight: 600; margin-top: 10px;">
+        📖 पूरा ब्लॉग पढ़ें → 
+    </a>
+    <div style="font-size: 12px; margin-top: 12px; color: #888;">{url}</div>
+</div>"""
     
     # ===== FOLLOW-UP =====
     elif intent == "follow_up":
@@ -367,13 +434,13 @@ You remember everything the user has said in this conversation."""
 def home():
     return jsonify({
         "status": "AI System Running - ChatGPT Style",
-        "version": "5.0",
+        "version": "5.1",
         "features": [
             "Perfect question counter (full history)",
             "Chat delete & restore",
             "Chat rename",
             "Full memory (all messages)",
-            "Clickable blog links",
+            "Clickable blog links with cards",
             "Fast responses",
             "Context recall"
         ]
@@ -674,14 +741,13 @@ def blog(slug):
             <div class="blog-container">
                 <div class="blog-header">
                     <h1>{post[0]}</h1>
-                    <div class="blog-date">📅 {post[2]}</div>
+                    <div class="blog-date">📅 {post[2][:10]}</div>
                 </div>
                 <div class="blog-content">
                     {post[1]}
                 </div>
                 <div style="padding: 20px; text-align: center; border-top: 1px solid #eee;">
                     <a href="{BACKEND_URL}" class="blog-btn">🏠 होम पेज</a>
-                    <a href="https://twitter.com/intent/tweet?text={post[0]}&url={BACKEND_URL}/blog/{slug}" class="blog-btn" style="background:#1DA1F2;">🐦 शेयर करें</a>
                 </div>
             </div>
         </body>
@@ -691,4 +757,4 @@ def blog(slug):
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=False)  
