@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
 from datetime import datetime
+import time  # YEH ADD KARO
 
 from config import BACKEND_URL
 from db import init_db, get_cursor, commit, create_campaign, get_campaigns, get_campaign, update_campaign
@@ -16,6 +17,9 @@ CORS(app)
 # Initialize database
 init_db()
 cursor = get_cursor()
+
+# YEH ADD KARO - Start time track karne ke liye
+start_time = time.time()
 
 # ================= ROUTES =================
 
@@ -36,9 +40,38 @@ def home():
         ]
     })
 
+# YEH PURANA /health WALA HATAA DO, ISSE REPLACE KARO
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+    """Health check endpoint for UptimeRobot"""
+    db_status = "ok"
+    try:
+        # Check database connection
+        from db import cursor
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": db_status,
+        "uptime_seconds": int(time.time() - start_time)
+    })
+
+# YEH NAYA ENDPOINT ADD KARO - Simple ping for UptimeRobot
+@app.route("/ping")
+def ping():
+    """Simple ping endpoint for UptimeRobot - returns fast response"""
+    try:
+        # Just check database is alive
+        from db import cursor
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        return "pong", 200
+    except Exception as e:
+        return f"database error: {str(e)}", 500
 
 @app.route("/campaigns")
 def campaigns():
