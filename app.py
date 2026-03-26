@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
 from datetime import datetime
-import time  # YEH ADD KARO
+import time
+import os  # YEH ADD KARO - Environment ke liye
 
 from config import BACKEND_URL
 from db import init_db, get_cursor, commit, create_campaign, get_campaigns, get_campaign, update_campaign
@@ -18,8 +19,39 @@ CORS(app)
 init_db()
 cursor = get_cursor()
 
-# YEH ADD KARO - Start time track karne ke liye
+# Track start time
 start_time = time.time()
+
+# ================= HEALTH CHECK FUNCTIONS =================
+
+def check_database():
+    """Check if database is accessible"""
+    try:
+        from db import cursor
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        return True, "connected"
+    except Exception as e:
+        return False, str(e)
+
+def get_uptime():
+    """Get server uptime in seconds"""
+    return int(time.time() - start_time)
+
+def get_database_size():
+    """Get database file size"""
+    try:
+        if os.path.exists("ai_system.db"):
+            size = os.path.getsize("ai_system.db")
+            if size < 1024:
+                return f"{size} bytes"
+            elif size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            else:
+                return f"{size / (1024 * 1024):.1f} MB"
+    except:
+        pass
+    return "unknown"
 
 # ================= ROUTES =================
 
@@ -40,38 +72,59 @@ def home():
         ]
     })
 
-# YEH PURANA /health WALA HATAA DO, ISSE REPLACE KARO
 @app.route("/health")
 def health():
-    """Health check endpoint for UptimeRobot"""
-    db_status = "ok"
-    try:
-        # Check database connection
-        from db import cursor
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
-    except Exception as e:
-        db_status = f"error: {str(e)}"
+    """Health check endpoint for UptimeRobot - ALWAYS RETURNS 200"""
+    db_ok, db_msg = check_database()
     
+    # Always return 200 OK for UptimeRobot
     return jsonify({
-        "status": "healthy",
+        "status": "healthy" if db_ok else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
-        "database": db_status,
-        "uptime_seconds": int(time.time() - start_time)
-    })
+        "database": db_msg,
+        "uptime_seconds": get_uptime(),
+        "server": "active"
+    }), 200  # Always 200 for UptimeRobot
 
-# YEH NAYA ENDPOINT ADD KARO - Simple ping for UptimeRobot
 @app.route("/ping")
 def ping():
-    """Simple ping endpoint for UptimeRobot - returns fast response"""
+    """Simple ping endpoint - returns fast response"""
+    return "pong", 200
+
+@app.route("/status")
+def status():
+    """Detailed status for monitoring"""
+    db_ok, db_msg = check_database()
+    
+    # Get stats from database
     try:
-        # Just check database is alive
         from db import cursor
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
-        return "pong", 200
-    except Exception as e:
-        return f"database error: {str(e)}", 500
+        cursor.execute("SELECT COUNT(*) FROM campaigns WHERE is_deleted=0")
+        active_chats = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM messages")
+        total_messages = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM posts")
+        total_blogs = cursor.fetchone()[0]
+    except:
+        active_chats = 0
+        total_messages = 0
+        total_blogs = 0
+    
+    return jsonify({
+        "status": "ok" if db_ok else "error",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": db_msg,
+        "uptime_seconds": get_uptime(),
+        "stats": {
+            "active_chats": active_chats,
+            "total_messages": total_messages,
+            "total_blogs": total_blogs,
+            "database_size": get_database_size()
+        },
+        "backend_url": BACKEND_URL
+    })
 
 @app.route("/campaigns")
 def campaigns():
