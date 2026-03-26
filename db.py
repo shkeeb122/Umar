@@ -1,6 +1,9 @@
+# db.py - IMPROVED COMPLETE VERSION
+
 import sqlite3
 from datetime import datetime
 import uuid
+import json
 
 conn = None
 cursor = None
@@ -37,7 +40,26 @@ def init_db():
     )
     """)
     
-    # Blogs Table (posts)
+    # 🔥 IMPROVED BLOG TABLE - Enhanced version
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS blogs_enhanced(
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        content TEXT,
+        raw_content TEXT,
+        slug TEXT UNIQUE,
+        excerpt TEXT,
+        reading_time INTEGER DEFAULT 3,
+        tags TEXT,
+        meta_description TEXT,
+        featured_image TEXT,
+        view_count INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    """)
+    
+    # Old posts table for backward compatibility
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS posts(
         id TEXT PRIMARY KEY,
@@ -147,7 +169,6 @@ def rename_campaign(campaign_id, new_name):
 def delete_campaign(campaign_id, now):
     """Soft delete a campaign"""
     cursor.execute("UPDATE campaigns SET is_deleted=1, updated_at=? WHERE id=?", (now, campaign_id))
-    # Store in deleted_chats
     row = cursor.execute("SELECT title FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
     if row:
         cursor.execute("""
@@ -207,22 +228,183 @@ def get_all_user_messages(campaign_id):
     """, (campaign_id,)).fetchall()
     return [{"content": r[0], "is_question": r[1]} for r in rows]
 
-# ================= BLOG FUNCTIONS =================
+# ================= 🔥 IMPROVED BLOG FUNCTIONS =================
+
+def save_blog_enhanced(blog_id, title, content, raw_content, slug, excerpt, 
+                       reading_time, tags, meta_description, featured_image, created_at):
+    """Save enhanced blog to database"""
+    try:
+        cursor.execute("""
+            INSERT INTO blogs_enhanced 
+            (id, title, content, raw_content, slug, excerpt, reading_time, tags, 
+             meta_description, featured_image, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            blog_id, title, content, raw_content, slug, excerpt, reading_time,
+            tags, meta_description, featured_image, created_at, created_at
+        ))
+        commit()
+        return True
+    except Exception as e:
+        print(f"Error saving blog: {e}")
+        return False
+
+def get_blog_by_slug_enhanced(slug):
+    """Get blog by slug with enhanced fields"""
+    try:
+        row = cursor.execute("""
+            SELECT title, content, created_at, excerpt, reading_time, tags, meta_description, featured_image, slug
+            FROM blogs_enhanced 
+            WHERE slug = ?
+        """, (slug,)).fetchone()
+        
+        if row:
+            # Increment view count
+            cursor.execute("UPDATE blogs_enhanced SET view_count = view_count + 1 WHERE slug = ?", (slug,))
+            commit()
+            
+            return {
+                "title": row[0],
+                "content": row[1],
+                "created_at": row[2],
+                "excerpt": row[3] or "",
+                "reading_time": row[4] or 3,
+                "tags": row[5].split(',') if row[5] else [],
+                "meta_description": row[6] or "",
+                "featured_image": row[7] or "",
+                "slug": row[8]
+            }
+        return None
+    except Exception as e:
+        print(f"Error getting blog: {e}")
+        return None
+
+def get_blog_by_slug(slug):
+    """Get blog by slug - backward compatible"""
+    try:
+        # First try enhanced table
+        enhanced = get_blog_by_slug_enhanced(slug)
+        if enhanced:
+            return (enhanced["title"], enhanced["content"], enhanced["created_at"])
+        
+        # Fallback to old posts table
+        row = cursor.execute(
+            "SELECT title, content, created_at FROM posts WHERE slug=?", 
+            (slug,)
+        ).fetchone()
+        return row
+    except:
+        return None
+
+def get_all_blogs(limit=10):
+    """Get all blogs from database"""
+    try:
+        # Try enhanced table first
+        rows = cursor.execute("""
+            SELECT title, slug, excerpt, created_at, reading_time, featured_image
+            FROM blogs_enhanced 
+            ORDER BY created_at DESC LIMIT ?
+        """, (limit,)).fetchall()
+        
+        if rows:
+            return [
+                {
+                    "title": r[0],
+                    "slug": r[1],
+                    "excerpt": r[2] or "",
+                    "created_at": r[3],
+                    "reading_time": r[4] or 3,
+                    "featured_image": r[5] or ""
+                } for r in rows
+            ]
+        
+        # Fallback to old posts table
+        rows = cursor.execute("""
+            SELECT title, slug, created_at FROM posts 
+            ORDER BY created_at DESC LIMIT ?
+        """, (limit,)).fetchall()
+        
+        return [
+            {
+                "title": r[0],
+                "slug": r[1],
+                "excerpt": "",
+                "created_at": r[2],
+                "reading_time": 3,
+                "featured_image": ""
+            } for r in rows
+        ]
+    except Exception as e:
+        print(f"Error in get_all_blogs: {e}")
+        return []
+
+def get_blog_by_id(blog_id):
+    """Get blog by ID"""
+    try:
+        row = cursor.execute("""
+            SELECT title, content, created_at, slug, excerpt, reading_time
+            FROM blogs_enhanced 
+            WHERE id = ?
+        """, (blog_id,)).fetchone()
+        
+        if row:
+            return {
+                "title": row[0],
+                "content": row[1],
+                "created_at": row[2],
+                "slug": row[3],
+                "excerpt": row[4] or "",
+                "reading_time": row[5] or 3
+            }
+        return None
+    except Exception as e:
+        print(f"Error in get_blog_by_id: {e}")
+        return None
+
+def get_related_blogs(title, tags, exclude_slug=None, limit=3):
+    """Get related blogs based on tags and title"""
+    try:
+        if not tags:
+            tags = []
+        
+        # Simple search: match by tags or title
+        search_term = f"%{title[:20]}%"
+        
+        if tags:
+            tag_pattern = f"%{tags[0]}%" if tags else "%"
+            rows = cursor.execute("""
+                SELECT title, slug, excerpt, created_at
+                FROM blogs_enhanced 
+                WHERE (title LIKE ? OR tags LIKE ?) AND slug != ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (search_term, tag_pattern, exclude_slug or '', limit)).fetchall()
+        else:
+            rows = cursor.execute("""
+                SELECT title, slug, excerpt, created_at
+                FROM blogs_enhanced 
+                WHERE title LIKE ? AND slug != ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (search_term, exclude_slug or '', limit)).fetchall()
+        
+        return [
+            {
+                "title": r[0],
+                "slug": r[1],
+                "excerpt": r[2] or "",
+                "created_at": r[3]
+            } for r in rows
+        ]
+    except Exception as e:
+        print(f"Error in get_related_blogs: {e}")
+        return []
 
 def save_blog(blog_id, title, content, slug, created_at):
-    """Save a blog post"""
+    """Save a blog post - backward compatible"""
     cursor.execute("""
         INSERT INTO posts (id, title, content, slug, created_at)
         VALUES (?, ?, ?, ?, ?)
     """, (blog_id, title[:200], content, slug, created_at))
     commit()
-
-def get_blog_by_slug(slug):
-    """Get blog by slug"""
-    return cursor.execute(
-        "SELECT title, content, created_at FROM posts WHERE slug=?", 
-        (slug,)
-    ).fetchone()
 
 def save_generated_content(content_id, campaign_id, content_type, title, url, created_at):
     """Save generated content (blog, etc.)"""
