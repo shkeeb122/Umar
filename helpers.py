@@ -1,4 +1,19 @@
+# helpers.py - COMPLETE WORKING VERSION
+
 import re
+
+def calculate_reading_time(content):
+    """Calculate reading time in minutes"""
+    if not content:
+        return 3
+    
+    # Remove markdown formatting
+    clean_text = re.sub(r'[#*`]', '', content)
+    words = len(clean_text.split())
+    
+    # 200 words per minute
+    reading_time = max(1, round(words / 200))
+    return reading_time
 
 def is_question(text):
     """Check if message is a question"""
