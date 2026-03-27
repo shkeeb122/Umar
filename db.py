@@ -1,9 +1,8 @@
-# db.py - IMPROVED COMPLETE VERSION
+# db.py - COMPLETE WORKING VERSION
 
 import sqlite3
 from datetime import datetime
 import uuid
-import json
 
 conn = None
 cursor = None
@@ -370,8 +369,8 @@ def get_related_blogs(title, tags, exclude_slug=None, limit=3):
         # Simple search: match by tags or title
         search_term = f"%{title[:20]}%"
         
-        if tags:
-            tag_pattern = f"%{tags[0]}%" if tags else "%"
+        if tags and tags[0]:
+            tag_pattern = f"%{tags[0]}%"
             rows = cursor.execute("""
                 SELECT title, slug, excerpt, created_at
                 FROM blogs_enhanced 
