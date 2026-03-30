@@ -1,3 +1,13 @@
+# ai_service.py - COMPLETE WORKING VERSION
+# ====================================================================
+# 📁 FILE: ai_service.py
+# 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
+# 🔗 USED BY: app.py
+# 🔗 USES: db.py, helpers.py, blog_service.py, config.py
+# 📋 TOTAL FUNCTIONS: 8
+# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat
+# ====================================================================
+
 import requests
 import time
 import uuid
