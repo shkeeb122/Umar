@@ -1,9 +1,18 @@
+# app.py - COMPLETE WORKING VERSION
+# ====================================================================
+# 📁 FILE: app.py
+# 🎯 ROLE: BOSS - Sab requests handle karta hai, routes manage karta hai
+# 🔗 USES: db.py, helpers.py, ai_service.py, blog_service.py, config.py
+# 🔗 CALLED BY: Frontend (Vercel)
+# 📋 TOTAL ROUTES: 12
+# ====================================================================
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid
 from datetime import datetime
 import time
-import os  # YEH ADD KARO - Environment ke liye
+import os
 
 from config import BACKEND_URL
 from db import init_db, get_cursor, commit, create_campaign, get_campaigns, get_campaign, update_campaign
@@ -76,15 +85,13 @@ def home():
 def health():
     """Health check endpoint for UptimeRobot - ALWAYS RETURNS 200"""
     db_ok, db_msg = check_database()
-    
-    # Always return 200 OK for UptimeRobot
     return jsonify({
         "status": "healthy" if db_ok else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
         "database": db_msg,
         "uptime_seconds": get_uptime(),
         "server": "active"
-    }), 200  # Always 200 for UptimeRobot
+    }), 200
 
 @app.route("/ping")
 def ping():
@@ -95,16 +102,12 @@ def ping():
 def status():
     """Detailed status for monitoring"""
     db_ok, db_msg = check_database()
-    
-    # Get stats from database
     try:
         from db import cursor
         cursor.execute("SELECT COUNT(*) FROM campaigns WHERE is_deleted=0")
         active_chats = cursor.fetchone()[0]
-        
         cursor.execute("SELECT COUNT(*) FROM messages")
         total_messages = cursor.fetchone()[0]
-        
         cursor.execute("SELECT COUNT(*) FROM posts")
         total_blogs = cursor.fetchone()[0]
     except:
@@ -139,10 +142,8 @@ def get_campaign_details(campaign_id):
         all_history = get_all_history(campaign_id)
         history = [{"role": h["role"], "content": h["content"]} for h in all_history]
         campaign = get_campaign(campaign_id)
-        
         if campaign and campaign.get("is_deleted"):
             return jsonify({"error": "Chat deleted"}), 404
-        
         return jsonify({
             "conversation": history,
             "title": campaign["title"] if campaign else "चैट",
@@ -157,11 +158,9 @@ def command():
     try:
         data = request.json or {}
         query = data.get("command")
-        
         if not query:
             return jsonify({"error": "कोई कमांड नहीं"}), 400
         
-        # Validate
         valid, msg = validate_message(query)
         if not valid:
             return jsonify({"error": msg}), 400
@@ -172,22 +171,13 @@ def command():
         
         is_ques = 1 if is_question(query) else 0
         intent = detect_intent(query)
-        
         response = generate_response(intent, query, [], [], campaign_id)
         
-        # Save messages
         save_message(str(uuid.uuid4()), campaign_id, "user", query, is_ques, now)
         save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
-        
-        # Create campaign
         create_campaign(campaign_id, query[:50], now, 2, is_ques, query[:100])
         
-        return jsonify({
-            "campaign_id": campaign_id,
-            "response": format_response(response),
-            "intent": intent
-        })
-        
+        return jsonify({"campaign_id": campaign_id, "response": format_response(response), "intent": intent})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -196,18 +186,15 @@ def chat(campaign_id):
     try:
         data = request.json or {}
         message = data.get("message")
-        
         if not message:
             return jsonify({"error": "खाली मैसेज"}), 400
         
-        # Validate
         valid, msg = validate_message(message)
         if not valid:
             return jsonify({"error": msg}), 400
         
         message = sanitize_text(message)
         campaign = get_campaign(campaign_id)
-        
         if not campaign:
             return jsonify({"error": "चैट नहीं मिली"}), 404
         if campaign.get("is_deleted"):
@@ -216,10 +203,8 @@ def chat(campaign_id):
         now = datetime.utcnow().isoformat()
         is_ques = 1 if is_question(message) else 0
         
-        # Get history
         all_history = get_all_history(campaign_id)
         recent_history = get_recent_history(campaign_id, 20)
-        
         intent = detect_intent(message, recent_history)
         
         # Handle rename command
@@ -227,37 +212,22 @@ def chat(campaign_id):
             new_name = message[7:].strip()
             if new_name:
                 rename_campaign(campaign_id, new_name)
-                return jsonify({
-                    "response": f"✅ चैट का नाम बदलकर **{new_name}** कर दिया गया!",
-                    "intent": "rename"
-                })
+                return jsonify({"response": f"✅ चैट का नाम बदलकर **{new_name}** कर दिया गया!", "intent": "rename"})
         
         # Handle delete command
         elif message.lower().strip() == "delete":
             delete_campaign(campaign_id, now)
-            return jsonify({
-                "response": "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।",
-                "intent": "delete",
-                "deleted": True
-            })
+            return jsonify({"response": "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।", "intent": "delete", "deleted": True})
         
-        # Generate response
         response = generate_response(intent, message, recent_history, all_history, campaign_id)
         
-        # Save messages
         save_message(str(uuid.uuid4()), campaign_id, "user", message, is_ques, now)
         save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
         
-        # Update campaign
         new_question_count = count_questions(campaign_id)
         update_campaign(campaign_id, now, 2, new_question_count, message[:100])
         
-        return jsonify({
-            "response": format_response(response),
-            "intent": intent,
-            "question_count": new_question_count
-        })
-        
+        return jsonify({"response": format_response(response), "intent": intent, "question_count": new_question_count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
