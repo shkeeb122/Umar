@@ -1,4 +1,10 @@
 # helpers.py - COMPLETE WORKING VERSION
+# ====================================================================
+# 📁 FILE: helpers.py
+# 🎯 ROLE: TOOLS - Chhote-2 kaam karne wale functions
+# 🔗 USED BY: Sab files (app, ai_service, blog_service)
+# 📋 TOTAL FUNCTIONS: 9
+# ====================================================================
 
 import re
 
