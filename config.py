@@ -1,3 +1,10 @@
+# config.py - COMPLETE WORKING VERSION
+# ====================================================================
+# 📁 FILE: config.py
+# 🎯 ROLE: SETTINGS - Sab API keys aur URLs yahan
+# 🔗 USED BY: Sab files (app, ai_service, blog_service, db)
+# ====================================================================
+
 import os
 
 # ================= CONFIGURATION =================
@@ -14,3 +21,7 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 
 # Database file
 DATABASE_FILE = "ai_system.db"
+
+# ================= VALIDATION =================
+if not MISTRAL_API_KEY:
+    print("⚠️ WARNING: MISTRAL_API_KEY not set in environment variables!")
