@@ -1,4 +1,11 @@
 # blog_service.py - COMPLETE WORKING VERSION
+# ====================================================================
+# 📁 FILE: blog_service.py
+# 🎯 ROLE: WORKER - Blog publish aur display karna
+# 🔗 USES: db.py, helpers.py, config.py
+# 🔗 CALLED BY: ai_service.py
+# 📋 TOTAL FUNCTIONS: 12
+# ====================================================================
 
 import uuid
 import re
@@ -14,76 +21,49 @@ from helpers import create_slug, calculate_reading_time
 def publish_blog(title, content, tags=None):
     """Publish blog with enhanced features"""
     try:
-        # Create unique slug
         slug_base = create_slug(title)
         slug = f"{slug_base}-{str(uuid.uuid4())[:5]}"
-        
-        # Calculate reading time
         reading_time = calculate_reading_time(content)
-        
-        # Generate excerpt
         excerpt = generate_excerpt(content)
         
-        # Process tags
         if tags:
             tag_list = [t.strip() for t in tags.split(',') if t.strip()]
         else:
             tag_list = extract_tags_from_content(content)
         
-        # Generate meta description
         meta_description = excerpt[:150] if excerpt else title[:150]
-        
-        # Format content for display
         formatted_content = format_blog_content(content)
-        
-        # Generate featured image
         featured_image = generate_featured_image(title)
         
-        # Save to database
         blog_id = str(uuid.uuid4())
         save_blog_enhanced(
-            blog_id=blog_id,
-            title=title,
-            content=formatted_content,
-            raw_content=content,
-            slug=slug,
-            excerpt=excerpt,
-            reading_time=reading_time,
-            tags=','.join(tag_list[:5]),
-            meta_description=meta_description,
-            featured_image=featured_image,
-            created_at=datetime.utcnow().isoformat()
+            blog_id, title, formatted_content, content, slug, excerpt,
+            reading_time, ','.join(tag_list[:5]), meta_description,
+            featured_image, datetime.utcnow().isoformat()
         )
         
         return f"{BACKEND_URL}/blog/{slug}"
-        
     except Exception as e:
         print(f"Blog publish error: {e}")
         return f"{BACKEND_URL}/blog/error"
 
 def generate_excerpt(content, max_words=50):
     """Generate blog excerpt from content"""
-    # Remove markdown formatting
     clean_text = re.sub(r'[#*`]', '', content)
     words = clean_text.split()
-    
     if len(words) <= max_words:
         return clean_text
-    
-    excerpt = ' '.join(words[:max_words])
-    return excerpt + '...'
+    return ' '.join(words[:max_words]) + '...'
 
 def extract_tags_from_content(content):
     """Extract tags from content"""
     tags = []
     keywords = ['AI', 'Machine Learning', 'Python', 'Technology', 'Guide', 
                 'Tutorial', 'Tips', 'How to', 'Best Practices', 'Tools']
-    
     content_lower = content.lower()
     for keyword in keywords:
         if keyword.lower() in content_lower:
             tags.append(keyword)
-    
     return list(set(tags))[:5]
 
 def generate_featured_image(title):
@@ -103,15 +83,9 @@ def format_blog_content(content):
     formatted = re.sub(r'```(\w*)\n([\s\S]*?)```', 
                        lambda m: f'<pre><code class="language-{m.group(1) or "plaintext"}">{escape_html(m.group(2).strip())}</code></pre>', 
                        formatted)
-    
-    # Handle inline code
     formatted = re.sub(r'`([^`]+)`', r'<code class="inline-code">\1</code>', formatted)
-    
-    # Headings
     formatted = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', formatted, flags=re.MULTILINE)
     formatted = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', formatted, flags=re.MULTILINE)
-    
-    # Bold and italic
     formatted = re.sub(r'\*\*\*(.*?)\*\*\*', r'<strong><em>\1</em></strong>', formatted)
     formatted = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted)
     formatted = re.sub(r'\*(.*?)\*', r'<em>\1</em>', formatted)
@@ -129,8 +103,6 @@ def format_blog_content(content):
         return match.group(0)
     
     formatted = re.sub(r'(?:\n\* .*?\n)+', format_list, formatted, flags=re.MULTILINE)
-    
-    # Blockquotes
     formatted = re.sub(r'^> (.*?)$', r'<blockquote>\1</blockquote>', formatted, flags=re.MULTILINE)
     
     # Links
@@ -145,7 +117,6 @@ def format_blog_content(content):
             formatted_paragraphs.append(f'<p>{para}</p>')
         else:
             formatted_paragraphs.append(para)
-    
     formatted = '\n'.join(formatted_paragraphs)
     
     return formatted
@@ -153,11 +124,9 @@ def format_blog_content(content):
 def get_blog_html(slug):
     """Generate complete blog HTML page"""
     post = get_blog_by_slug(slug)
-    
     if not post:
         return None
     
-    # Handle different return types
     if isinstance(post, dict):
         title = post["title"]
         content = post["content"]
@@ -173,26 +142,16 @@ def get_blog_html(slug):
         tags = extract_tags_from_content(content)
         featured_image = generate_featured_image(title)
     
-    # Get related blogs
     related_blogs = get_related_blogs(title, tags, exclude_slug=slug)
     
     return generate_blog_html_page(
-        title=title,
-        content=content,
-        created_at=created_at,
-        excerpt=excerpt,
-        reading_time=reading_time,
-        tags=tags,
-        featured_image=featured_image,
-        related_blogs=related_blogs,
-        slug=slug
+        title, content, created_at, excerpt, reading_time,
+        tags, featured_image, related_blogs, slug
     )
 
 def generate_blog_html_page(title, content, created_at, excerpt, reading_time, 
                             tags, featured_image, related_blogs, slug):
     """Generate complete blog HTML page"""
-    
-    # Format date
     try:
         date_obj = datetime.fromisoformat(created_at)
         formatted_date = date_obj.strftime("%B %d, %Y")
@@ -212,9 +171,6 @@ def generate_blog_html_page(title, content, created_at, excerpt, reading_time,
     <meta property="og:url" content="{BACKEND_URL}/blog/{slug}">
     <meta property="og:type" content="article">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{escape_html(title)}">
-    <meta name="twitter:description" content="{escape_html(excerpt[:150])}">
-    <meta name="twitter:image" content="{featured_image}">
     <title>{escape_html(title)} | AI Blog</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -243,120 +199,33 @@ def generate_blog_html_page(title, content, created_at, excerpt, reading_time,
         }}
         .featured-image i {{ font-size: 80px; color: white; opacity: 0.8; }}
         .blog-header {{ padding: 40px 40px 20px; background: white; }}
-        .blog-header h1 {{
-            font-size: 2.5rem;
-            line-height: 1.3;
-            color: #1a1a2e;
-            margin-bottom: 20px;
-        }}
-        .blog-meta {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-bottom: 20px;
-            color: #666;
-            font-size: 14px;
-        }}
+        .blog-header h1 {{ font-size: 2.5rem; line-height: 1.3; color: #1a1a2e; margin-bottom: 20px; }}
+        .blog-meta {{ display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px; color: #666; font-size: 14px; }}
         .blog-meta-item {{ display: flex; align-items: center; gap: 8px; }}
         .blog-meta-item i {{ color: #667eea; }}
         .blog-tags {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }}
-        .blog-tag {{
-            background: #f0f0f0;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #667eea;
-            text-decoration: none;
-        }}
+        .blog-tag {{ background: #f0f0f0; padding: 5px 12px; border-radius: 20px; font-size: 12px; color: #667eea; text-decoration: none; }}
         .blog-tag:hover {{ background: #667eea; color: white; }}
         .blog-content {{ padding: 20px 40px 40px; line-height: 1.8; color: #333; }}
-        .blog-content h2 {{
-            font-size: 1.8rem;
-            margin: 40px 0 20px;
-            color: #1a1a2e;
-            border-left: 4px solid #667eea;
-            padding-left: 20px;
-        }}
-        .blog-content h3 {{ font-size: 1.4rem; margin: 30px 0 15px; color: #1a1a2e; }}
-        .blog-content pre {{
-            background: #1e1e1e;
-            color: #d4d4d4;
-            padding: 20px;
-            border-radius: 12px;
-            overflow-x: auto;
-            margin: 25px 0;
-        }}
-        .blog-content code {{
-            background: #f4f4f4;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }}
-        .blog-content ul {{ margin: 20px 0 20px 30px; }}
-        .blog-content li {{ margin-bottom: 10px; }}
-        .blog-content blockquote {{
-            background: #f8f9fa;
-            border-left: 4px solid #667eea;
-            padding: 15px 25px;
-            margin: 25px 0;
-            font-style: italic;
-        }}
-        .share-section {{
-            padding: 30px 40px;
-            border-top: 1px solid #eee;
-            background: #fafafa;
-            text-align: center;
-        }}
+        .blog-content h2 {{ font-size: 1.8rem; margin: 40px 0 20px; color: #1a1a2e; border-left: 4px solid #667eea; padding-left: 20px; }}
+        .blog-content pre {{ background: #1e1e1e; color: #d4d4d4; padding: 20px; border-radius: 12px; overflow-x: auto; margin: 25px 0; }}
+        .blog-content code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }}
+        .share-section {{ padding: 30px 40px; border-top: 1px solid #eee; background: #fafafa; text-align: center; }}
         .share-title {{ font-size: 18px; font-weight: 600; margin-bottom: 15px; }}
         .share-buttons {{ display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; }}
-        .share-btn {{
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 20px;
-            border-radius: 30px;
-            color: white;
-            text-decoration: none;
-            font-size: 14px;
-        }}
+        .share-btn {{ display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 30px; color: white; text-decoration: none; font-size: 14px; }}
         .share-twitter {{ background: #1DA1F2; }}
         .share-facebook {{ background: #4267B2; }}
         .share-linkedin {{ background: #0077B5; }}
         .share-whatsapp {{ background: #25D366; }}
         .share-copy {{ background: #6c757d; cursor: pointer; border: none; }}
-        .related-section {{
-            background: white;
-            border-radius: 24px;
-            padding: 30px;
-            margin-bottom: 20px;
-        }}
+        .related-section {{ background: white; border-radius: 24px; padding: 30px; margin-bottom: 20px; }}
         .related-title {{ font-size: 1.5rem; margin-bottom: 20px; color: #1a1a2e; }}
-        .related-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
-        }}
-        .related-item {{
-            background: #f8f9fa;
-            border-radius: 16px;
-            padding: 20px;
-            text-decoration: none;
-            display: block;
-            transition: transform 0.2s;
-        }}
+        .related-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }}
+        .related-item {{ background: #f8f9fa; border-radius: 16px; padding: 20px; text-decoration: none; display: block; transition: transform 0.2s; }}
         .related-item:hover {{ transform: translateY(-3px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }}
-        .related-item h4 {{ font-size: 1.1rem; color: #1a1a2e; margin-bottom: 10px; }}
-        .related-item p {{ font-size: 0.85rem; color: #666; }}
         .blog-footer {{ text-align: center; padding: 30px; background: white; border-radius: 24px; }}
-        .back-home {{
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 30px;
-            text-decoration: none;
-        }}
+        .back-home {{ display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 30px; text-decoration: none; }}
         @media (max-width: 600px) {{
             body {{ padding: 10px; }}
             .blog-header {{ padding: 25px; }}
@@ -409,15 +278,9 @@ def generate_related_blogs_html(related_blogs):
     """Generate related blogs HTML section"""
     if not related_blogs:
         return ''
-    
     html = '<div class="related-section"><h3 class="related-title">📖 You might also like</h3><div class="related-grid">'
     for blog in related_blogs[:3]:
-        html += f'''
-        <a href="{BACKEND_URL}/blog/{blog['slug']}" class="related-item">
-            <h4>{escape_html(blog['title'])}</h4>
-            <p>{escape_html(blog.get('excerpt', '')[:80])}...</p>
-        </a>
-        '''
+        html += f'<a href="{BACKEND_URL}/blog/{blog["slug"]}" class="related-item"><h4>{escape_html(blog["title"])}</h4><p>{escape_html(blog.get("excerpt", "")[:80])}...</p></a>'
     html += '</div></div>'
     return html
 
@@ -425,9 +288,4 @@ def escape_html(text):
     """Escape HTML special characters"""
     if not text:
         return ""
-    return (str(text)
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-            .replace("'", "&#39;"))
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;"))
