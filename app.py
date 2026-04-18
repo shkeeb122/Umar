@@ -20,7 +20,7 @@ from db import rename_campaign, delete_campaign, restore_campaign, save_message,
 from helpers import is_question, format_response, validate_message, sanitize_text
 from ai_service import detect_intent, generate_response
 from blog_service import get_blog_html
-
+from health_service import get_full_health_report, get_quick_status, auto_fix_all
 app = Flask(__name__)
 CORS(app)
 
