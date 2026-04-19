@@ -21,9 +21,9 @@ from db import (
 def publish_blog(title, content, tags=None):
     """Publish blog with enhanced features"""
     try:
-        slug_base = create_slug(title)  # ← YAHAN ERROR AAYEGA
+        slug_base = create_slug(title)  # ← ERROR: create_slug not defined
         slug = f"{slug_base}-{str(uuid.uuid4())[:5]}"
-        reading_time = calculate_reading_time(content)  # ← YAHAN ERROR AAYEGA
+        reading_time = calculate_reading_time(content)  # ← ERROR: not defined
         excerpt = generate_excerpt(content)
         
         if tags:
@@ -33,7 +33,7 @@ def publish_blog(title, content, tags=None):
         
         meta_description = excerpt[:150] if excerpt else title[:150]
         formatted_content = format_blog_content(content)
-        featured_image = generate_featured_image(title)  # ← YAHAN ERROR AAYEGA
+        featured_image = generate_featured_image(title)  # ← ERROR: function name changed
         
         blog_id = str(uuid.uuid4())
         save_blog_enhanced(
@@ -47,10 +47,11 @@ def publish_blog(title, content, tags=None):
         print(f"Blog publish error: {e}")
         return f"{BACKEND_URL}/blog/error"
 
-# ... बाकी code ...
+# ... बाकी सब कुछ वैसा ही रहने दो ...
 
-def generate_featured_image_OLD(title):  # ← LINE 55 FUNCTION NAME CHANGED
+def generate_featured_image_OLD(title):   # ← LINE 55 FUNCTION NAME CHANGED
     """Generate featured image URL"""
     clean_title = re.sub(r'[^\w\s]', '', title)
     clean_title = clean_title.replace(' ', '+')
-    return f"https://via.placeholder.com/1200x630/667eea/ffffff?text={clean_title[:30]}"
+    return f"https://via.placeholder.com/1200x630/667eea/ffffff?text={clean_title[:30]}"        
+       
