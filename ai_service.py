@@ -5,7 +5,7 @@
 # 🔗 USED BY: app.py
 # 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py
 # 📋 TOTAL FUNCTIONS: 10
-# 🎯 INTENTS DETECTED: 13 intents (6 original + 7 github)
+# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat, create_file, update_file, delete_file, read_file, list_files, github_test, repo_info
 # ====================================================================
 
 import requests
