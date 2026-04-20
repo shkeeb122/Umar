@@ -3,9 +3,9 @@
 # 📁 FILE: ai_service.py
 # 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
 # 🔗 USED BY: app.py
-# 🔗 USES: db.py, helpers.py, blog_service.py, config.py
-# 📋 TOTAL FUNCTIONS: 8
-# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat
+# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py
+# 📋 TOTAL FUNCTIONS: 10
+# 🎯 INTENTS DETECTED: 13 intents (6 original + 7 github)
 # ====================================================================
 
 import requests
@@ -17,6 +17,9 @@ from config import MISTRAL_URL, HEADERS, MODEL_NAME, BACKEND_URL
 from db import get_recent_history, get_all_history, count_questions, save_message, update_campaign, save_generated_content
 from helpers import is_question, format_response, extract_topic, create_slug
 import db
+
+# ================= GITHUB AUTOMATION IMPORT =================
+from github_service import GitHubService
 
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
     """Single AI call with Mistral API"""
@@ -51,6 +54,36 @@ def detect_intent(text, history=None):
     """Advanced intent detection with context"""
     t = text.lower()
     
+    # ================= GITHUB AUTOMATION INTENTS =================
+    # Create File
+    if any(w in t for w in ["बनाओ", "create", "नई file", "new file", "file banao"]):
+        return "create_file"
+    
+    # Update File
+    if any(w in t for w in ["update", "बदलो", "edit", "change", "modify"]):
+        return "update_file"
+    
+    # Delete File
+    if any(w in t for w in ["delete", "हटाओ", "remove", "mitao"]):
+        return "delete_file"
+    
+    # Read File
+    if any(w in t for w in ["दिखाओ", "read", "show", "dekho", "content"]):
+        return "read_file"
+    
+    # List Files
+    if any(w in t for w in ["files list", "कौन कौन files", "list files", "saari files", "all files"]):
+        return "list_files"
+    
+    # GitHub Test
+    if any(w in t for w in ["github test", "connection check", "test connection", "github check"]):
+        return "github_test"
+    
+    # Repo Info
+    if any(w in t for w in ["repo info", "repository info", "github info"]):
+        return "repo_info"
+    
+    # ================= ORIGINAL INTENTS =================
     # Question count
     if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye", "kitne question"]):
         return "count_questions"
@@ -89,139 +122,65 @@ Use markdown formatting (**, *, etc). Keep it informative and engaging."""
     messages = [{"role": "system", "content": system}]
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
+# ================= GITHUB AUTOMATION HELPER FUNCTIONS =================
+
+def extract_file_name(message):
+    """Message se file name extract karo"""
+    words = message.split()
+    for word in words:
+        if '.' in word and len(word) > 3:
+            return word
+    return None
+
+def extract_code_from_message(message):
+    """Message se code block extract karo"""
+    if '```' in message:
+        parts = message.split('```')
+        if len(parts) >= 2:
+            code = parts[1].strip()
+            if code.startswith('python'):
+                code = code[6:].strip()
+            return code
+    return None
+
 def generate_response(intent, message, history, all_history, campaign_id=None):
     """Generate smart response with full context"""
     
-    # ===== COUNT QUESTIONS =====
-    if intent == "count_questions":
-        total = count_questions(campaign_id)
-        questions = [m for m in all_history if m.get("role") == "user" and m.get("is_question")]
-        first_q = questions[0]["content"][:50] if questions else ""
-        
-        return f"""📊 **आपके सवालों की संख्या**
-
-आपने अब तक **{total} सवाल** पूछे हैं!
-
-🔹 पहला सवाल: "{first_q}..."
-
-क्या मैं और किसी सवाल का जवाब दूं? 😊"""
+    # ================= GITHUB AUTOMATION HANDLERS =================
     
-    # ===== LIST ALL QUESTIONS =====
-    elif intent == "list_questions":
-        questions = [m for m in all_history if m.get("role") == "user" and m.get("is_question")]
+    # ----- CREATE FILE -----
+    if intent == "create_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
         
-        if not questions:
-            return "📝 आपने अभी तक कोई सवाल नहीं पूछा है! कोई सवाल पूछना चाहेंगे? 😊"
+        if not file_name:
+            return "❓ कौन सी file बनानी है? File name बताओ (जैसे: test.py)"
         
-        response = "📋 **आपके सारे सवाल (शुरू से अब तक):**\n\n"
-        for i, q in enumerate(questions, 1):
-            response += f"{i}. {q['content'][:150]}\n"
+        code = extract_code_from_message(message)
+        if not code:
+            code = f"# {file_name}\n# Auto-created by AI System\n# Created: {datetime.utcnow().isoformat()}\n\n"
         
-        response += f"\n✅ **कुल:** {len(questions)} सवाल"
-        return response
-    
-    # ===== GENERATE BLOG =====
-    elif intent == "blog":
-        from blog_service import publish_blog
-        topic = extract_topic(message)
-        content = generate_blog(topic)
+        result = github.create_file(file_name, code)
         
-        # Extract title from content
-        title_match = extract_title_from_content(content)
-        title = title_match if title_match else topic[:80]
-        
-        url = publish_blog(title, content)
-        
-        # Save generated content record
-        save_generated_content(
-            str(uuid.uuid4()), campaign_id, "blog", title, url, datetime.utcnow().isoformat()
-        )
-        
-        return f"""{content}
-
----
-
-<div class="blog-published" style="background: linear-gradient(135deg, #10b98120, #10b98110); border-radius: 16px; padding: 20px; text-align: center; margin-top: 20px; border: 1px solid #10b98140;">
-    📝 <strong style="font-size: 18px;">✨ ब्लॉग प्रकाशित हो गया है! ✨</strong><br><br>
-    <a href="{url}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 30px; text-decoration: none; font-weight: 600;">
-        📖 पूरा ब्लॉग पढ़ें →
-    </a>
-</div>"""
-    
-    # ===== FOLLOW-UP =====
-    elif intent == "follow_up":
-        last_user_msg = None
-        for msg in reversed(all_history):
-            if msg.get("role") == "user":
-                last_user_msg = msg.get("content")
-                break
-        
-        if last_user_msg:
-            system = """You are a helpful AI. The user wants you to elaborate on the previous topic.
-            Give more details, examples, and deeper insights. Be conversational and engaging.
-            Reference what was discussed before."""
-            
-            context = history[-10:] if len(history) > 10 else history
-            
-            msgs = [{"role": "system", "content": system}]
-            msgs.extend(context)
-            msgs.append({"role": "user", "content": f"Previous topic was: {last_user_msg}\nNow please elaborate: {message}"})
-            
-            return ai_chat(msgs, temperature=0.75)
+        if result["success"]:
+            return f"""✅ **{result['message']}**
+📁 **File:** `{file_name}`
+🔗 **URL:** {result['file_url']}"""
         else:
-            return "मैं और विस्तार से बता सकता हूँ! कृपया बताइए कि आप किस बारे में और जानना चाहते हैं? 😊"
+            return f"❌ File नहीं बन पाई: {result['error']}"
     
-    # ===== RECALL PAST =====
-    elif intent == "recall":
-        keyword = message.lower().replace("pehle", "").replace("kya", "").replace("tha", "").strip()
+    # ----- UPDATE FILE -----
+    elif intent == "update_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
         
-        relevant = []
-        for msg in reversed(all_history[-20:]):
-            if msg.get("role") == "user" and (keyword in msg.get("content", "").lower() or not keyword):
-                relevant.append(msg.get("content"))
-                if len(relevant) >= 3:
-                    break
+        if not file_name:
+            return "❓ कौन सी file update करनी है? File name बताओ।"
         
-        if relevant:
-            response = "📜 **पहले की बातचीत:**\n\n"
-            for i, r in enumerate(relevant, 1):
-                response += f"{i}. {r}\n"
-            return response
-        else:
-            return "😊 मुझे पहले की कोई ऐसी बात याद नहीं आ रही। क्या आप थोड़ा और बता सकते हैं?"
-    
-    # ===== GENERAL CHAT =====
-    else:
-        system = """You are a friendly, helpful AI assistant with perfect memory of this conversation.
-
-IMPORTANT RULES:
-- Be conversational and natural, like ChatGPT
-- Use emojis occasionally 😊 🚀 💡
-- ALWAYS reference previous conversations when relevant
-- If user asks about past, recall accurately
-- Give clear, structured answers
-- Be concise but thorough
-- Use Hindi and English naturally (Hinglish)
-
-You remember everything the user has said in this conversation."""
-        
-        context = history[-15:] if len(history) > 15 else history
-        
-        msgs = [{"role": "system", "content": system}]
-        msgs.extend(context)
-        msgs.append({"role": "user", "content": message})
-        
-        return ai_chat(msgs, temperature=0.7)
-
-def extract_title_from_content(content):
-    """Extract title from blog content"""
-    title_match = None
-    lines = content.split('\n')
-    for line in lines:
-        if line.startswith('#') or line.startswith('##'):
-            title_match = line.strip('# ').strip()
-            break
-        elif line.strip() and len(line) < 100:
-            title_match = line.strip()
-            break
-    return title_match
+        new_code = extract_code_from_message(message)
+        if not new_code:
+            read_result = github.read_file(file_name)
+            if read_result["success"]:
+                return f"""📄 **Current content of `{file_name}`:**
+```python
+{read_result['content'][:500]}
