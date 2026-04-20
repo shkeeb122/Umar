@@ -183,4 +183,4 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
             if read_result["success"]:
                 return f"""📄 **Current content of `{file_name}`:**
 ```python
-{read_result['content'][:500]}
+{read
