@@ -22,6 +22,18 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
 # Database file
 DATABASE_FILE = "ai_system.db"
 
+# ================= GITHUB CONFIGURATION (AUTOMATION) =================
+# Public settings - GitHub Repo details
+GITHUB_OWNER = "shkee122"
+GITHUB_REPO = "Umar"
+GITHUB_BRANCH = "main"
+
+# Secret Token - Render Environment Variables se aayega
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+
 # ================= VALIDATION =================
 if not MISTRAL_API_KEY:
     print("⚠️ WARNING: MISTRAL_API_KEY not set in environment variables!")
+
+if not GITHUB_TOKEN:
+    print("⚠️ WARNING: GITHUB_TOKEN not set in Render Environment Variables!")
