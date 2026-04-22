@@ -169,7 +169,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
         else:
             return f"❌ File नहीं बन पाई: {result['error']}"
     
-    #     # ----- UPDATE FILE -----
+    # ----- UPDATE FILE -----
     elif intent == "update_file":
         github = GitHubService()
         file_name = extract_file_name(message)
@@ -194,3 +194,160 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
 🔗 **URL:** {result['file_url']}"""
         else:
             return f"❌ File update नहीं हो पाई: {result['error']}"
+    
+    # ----- DELETE FILE -----
+    elif intent == "delete_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file delete करनी है? File name बताओ।"
+        
+        result = github.delete_file(file_name)
+        
+        if result["success"]:
+            return f"✅ **{result['message']}**\n📁 **File:** `{file_name}`"
+        else:
+            return f"❌ File delete नहीं हो पाई: {result['error']}"
+    
+    # ----- READ FILE -----
+    elif intent == "read_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file पढ़नी है? File name बताओ।"
+        
+        result = github.read_file(file_name)
+        
+        if result["success"]:
+            content = result['content']
+            if len(content) > 2000:
+                content = content[:2000] + "\n\n... (file बड़ी है, पूरी नहीं दिखा सकते)"
+            return f"📄 **{file_name}**\n```python\n{content}\n```\n🔗 {result['file_url']}"
+        else:
+            return f"❌ File पढ़ नहीं पाए: {result['error']}"
+    
+    # ----- LIST FILES -----
+    elif intent == "list_files":
+        github = GitHubService()
+        result = github.list_files()
+        
+        if result["success"]:
+            if result["count"] == 0:
+                return "📂 Repository खाली है।"
+            
+            files_list = "\n".join([f"{f['type']} `{f['name']}`" for f in result["files"][:20]])
+            return f"📂 **Repository Files ({result['count']} total):**\n{files_list}"
+        else:
+            return f"❌ Files list नहीं मिली: {result['error']}"
+    
+    # ----- GITHUB TEST -----
+    elif intent == "github_test":
+        github = GitHubService()
+        result = github.test_connection()
+        
+        if result["success"]:
+            return f"""{result['message']}
+🔗 **Repo:** {result['repo_url']}
+🔒 **Private:** {result['private']}
+⭐ **Stars:** {result['stars']}"""
+        else:
+            return f"❌ Connection failed: {result['error']}"
+    
+    # ----- REPO INFO -----
+    elif intent == "repo_info":
+        github = GitHubService()
+        result = github.get_repo_info()
+        
+        if result["success"]:
+            return f"""📁 **{result['name']}**
+🔗 {result['url']}
+📝 {result['description']}
+⭐ {result['stars']} stars | 🍴 {result['forks']} forks
+💻 Language: {result['language']}
+📅 Created: {result['created'][:10]}
+🔄 Updated: {result['updated'][:10]}"""
+        else:
+            return f"❌ Repo info नहीं मिली: {result['error']}"
+    
+    # ================= ORIGINAL INTENTS =================
+    
+    # ----- COUNT QUESTIONS -----
+    elif intent == "count_questions":
+        if campaign_id:
+            count = count_questions(campaign_id)
+            return f"📊 आपने इस chat में **{count}** सवाल पूछे हैं।"
+        else:
+            return "📊 अभी कोई chat open नहीं है।"
+    
+    # ----- LIST QUESTIONS -----
+    elif intent == "list_questions":
+        if campaign_id:
+            all_msgs = get_all_history(campaign_id)
+            questions = [m for m in all_msgs if m.get("is_question")]
+            if questions:
+                q_list = "\n".join([f"{i+1}. {q['content'][:100]}" for i, q in enumerate(questions[:10])])
+                return f"📋 **आपके सवाल ({len(questions)} total):**\n{q_list}"
+            else:
+                return "📋 अभी तक कोई सवाल नहीं पूछा।"
+        else:
+            return "📋 अभी कोई chat open नहीं है।"
+    
+    # ----- BLOG -----
+    elif intent == "blog":
+        topic = extract_topic(message)
+        blog_content = generate_blog(topic)
+        
+        # Save blog to database
+        slug = create_slug(topic)
+        from db import save_blog_enhanced
+        from datetime import datetime
+        
+        blog_id = str(uuid.uuid4())
+        save_blog_enhanced(
+            blog_id, topic, blog_content, blog_content, slug,
+            blog_content[:150], 3, "", blog_content[:150], "",
+            datetime.utcnow().isoformat()
+        )
+        
+        return f"""{blog_content}
+
+---
+✅ **Blog Published!** 
+🔗 **Link:** {BACKEND_URL}/blog/{slug}"""
+    
+    # ----- FOLLOW-UP -----
+    elif intent == "follow_up":
+        if history and len(history) >= 2:
+            last_topic = history[-2]["content"][:100]
+            system = f"""User wants more details on the previous topic: "{last_topic}"
+Provide additional information, examples, and deeper insights."""
+            messages = [{"role": "system", "content": system}]
+            return ai_chat(messages, temperature=0.7, max_tokens=800)
+        else:
+            return "🤔 किस बारे में और बताऊं? पिछली बातचीत का context नहीं मिला।"
+    
+    # ----- RECALL -----
+    elif intent == "recall":
+        if all_history and len(all_history) > 0:
+            history_text = "\n".join([f"{m['role']}: {m['content'][:50]}" for m in all_history[-10:]])
+            system = f"""User wants to recall past conversation. Here's the history:
+{history_text}
+
+Summarize what was discussed earlier in a helpful way."""
+            messages = [{"role": "system", "content": system}]
+            return ai_chat(messages, temperature=0.5, max_tokens=500)
+        else:
+            return "📜 अभी तक कोई बातचीत नहीं हुई है।"
+    
+    # ----- DEFAULT CHAT -----
+    else:
+        if not history:
+            history = []
+        
+        system = """You are a helpful AI assistant. Answer questions clearly and concisely.
+Use markdown formatting when helpful. Be friendly and professional."""
+        
+        messages = [{"role": "system", "content": system}] + history[-10:]
+        return ai_chat(messages, temperature=0.7, max_tokens=1000)
