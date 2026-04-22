@@ -169,7 +169,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
         else:
             return f"❌ File नहीं बन पाई: {result['error']}"
     
-    # ----- UPDATE FILE -----
+    #     # ----- UPDATE FILE -----
     elif intent == "update_file":
         github = GitHubService()
         file_name = extract_file_name(message)
@@ -181,6 +181,16 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
         if not new_code:
             read_result = github.read_file(file_name)
             if read_result["success"]:
-                return f"""📄 **Current content of `{file_name}`:**
-```python
-{read_result['content'][:500]}
+                content_preview = read_result['content'][:500]
+                return f"📄 **Current content of `{file_name}`:**\n```python\n{content_preview}\n```"
+            else:
+                return f"❌ File पढ़ नहीं पाए: {read_result['error']}"
+        
+        result = github.update_file(file_name, new_code)
+        
+        if result["success"]:
+            return f"""✅ **{result['message']}**
+📁 **File:** `{file_name}`
+🔗 **URL:** {result['file_url']}"""
+        else:
+            return f"❌ File update नहीं हो पाई: {result['error']}"
