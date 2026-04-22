@@ -24,7 +24,7 @@ DATABASE_FILE = "ai_system.db"
 
 # ================= GITHUB CONFIGURATION (AUTOMATION) =================
 # Public settings - GitHub Repo details
-GITHUB_OWNER = "shkee122"
+GITHUB_OWNER = "shkeeb122"
 GITHUB_REPO = "Umar"
 GITHUB_BRANCH = "main"
 
