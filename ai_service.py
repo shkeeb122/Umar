@@ -146,6 +146,15 @@ def extract_code_from_message(message):
 def generate_response(intent, message, history, all_history, campaign_id=None):
     """Generate smart response with full context"""
     
+    # ================= FORCE GITHUB CHECK =================
+    words = message.lower().split()
+    has_file = any('.' in w and len(w) > 3 for w in words)
+    has_read = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content", "kitne function", "functions hain"])
+    
+    if has_file and has_read and intent == "chat":
+        intent = "read_file"
+    # ================= END FORCE CHECK =================
+    
     # ================= GITHUB AUTOMATION HANDLERS =================
     
     # ----- CREATE FILE -----
@@ -222,9 +231,11 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
         
         if result["success"]:
             content = result['content']
+            function_count = content.count('def ') + content.count('async def ')
+            
             if len(content) > 2000:
                 content = content[:2000] + "\n\n... (file बड़ी है, पूरी नहीं दिखा सकते)"
-            return f"📄 **{file_name}**\n```python\n{content}\n```\n🔗 {result['file_url']}"
+            return f"📄 **{file_name}** ({function_count} functions)\n```python\n{content}\n```\n🔗 {result['file_url']}"
         else:
             return f"❌ File पढ़ नहीं पाए: {result['error']}"
     
