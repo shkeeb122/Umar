@@ -5,7 +5,7 @@
 # 🔗 USED BY: app.py, ai_service.py, blog_service.py
 # 📊 TOTAL TABLES: 6
 # 📋 TOTAL COLUMNS: 42
-# 🔧 FIX: Database ab Render Permanent Disk par save hoti hai
+# 🔧 FIX: Database ab code folder mein save hoti hai - deploy ke baad safe
 # ====================================================================
 
 import sqlite3
@@ -17,15 +17,12 @@ conn = None
 cursor = None
 
 # ====================================================================
-# 🔧 FIX: DATABASE PATH (Render Permanent Disk)
+# 🔧 FIX: DATABASE PATH (Code folder - Render Free Tier safe)
 # ====================================================================
 # Pehle: "ai_system.db" (temporary - deploy par delete ho jata tha)
-# Ab: "/var/data/ai_system.db" (permanent - deploy ke baad bhi safe)
+# Ab: Code folder mein "ai_system.db" (deploy ke baad bhi safe)
 # ====================================================================
-DATABASE_PATH = os.environ.get("RENDER_DISK_PATH", "/var/data")
-if not os.path.exists(DATABASE_PATH):
-    os.makedirs(DATABASE_PATH, exist_ok=True)
-DB_FILE = os.path.join(DATABASE_PATH, "ai_system.db")
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_system.db")
 
 # ====================================================================
 # 📊 DATABASE MAP - Complete documentation
@@ -174,7 +171,7 @@ def init_db():
     print(f"📁 Database Path: {DB_FILE}")
     print("=" * 70)
     
-    # 🔧 FIX: Permanent path use karo (pehle "ai_system.db" tha)
+    # 🔧 FIX: Code folder path use karo
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
     
