@@ -4,7 +4,7 @@
 # 🎯 ROLE: BOSS - Sab requests handle karta hai, routes manage karta hai
 # 🔗 USES: db.py, helpers.py, ai_service.py, blog_service.py, config.py
 # 🔗 CALLED BY: Frontend (Vercel)
-# 📋 TOTAL ROUTES: 12
+# 📋 TOTAL ROUTES: 16
 # ====================================================================
 
 from flask import Flask, request, jsonify
@@ -21,6 +21,7 @@ from helpers import is_question, format_response, validate_message, sanitize_tex
 from ai_service import detect_intent, generate_response
 from blog_service import get_blog_html
 from health_service import get_full_health_report, get_quick_status, auto_fix_all
+
 app = Flask(__name__)
 CORS(app)
 
@@ -50,7 +51,6 @@ def get_uptime():
 def get_database_size():
     """Get database file size"""
     try:
-        # 🔧 FIX: Ab permanent path se size check karo
         from db import DB_FILE
         if os.path.exists(DB_FILE):
             size = os.path.getsize(DB_FILE)
@@ -64,7 +64,9 @@ def get_database_size():
         pass
     return "unknown"
 
-# ================= ROUTES =================
+# ====================================================================
+# ROUTES - Basic
+# ====================================================================
 
 @app.route("/")
 def home():
@@ -116,7 +118,7 @@ def status():
         active_chats = 0
         total_messages = 0
         total_blogs = 0
-    
+
     return jsonify({
         "status": "ok" if db_ok else "error",
         "timestamp": datetime.utcnow().isoformat(),
@@ -130,6 +132,10 @@ def status():
         },
         "backend_url": BACKEND_URL
     })
+
+# ====================================================================
+# ROUTES - Campaigns & Chat
+# ====================================================================
 
 @app.route("/campaigns")
 def campaigns():
@@ -162,23 +168,23 @@ def command():
         query = data.get("command")
         if not query:
             return jsonify({"error": "कोई कमांड नहीं"}), 400
-        
+
         valid, msg = validate_message(query)
         if not valid:
             return jsonify({"error": msg}), 400
-        
+
         query = sanitize_text(query)
         campaign_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
-        
+
         is_ques = 1 if is_question(query) else 0
         intent = detect_intent(query)
         response = generate_response(intent, query, [], [], campaign_id)
-        
+
         save_message(str(uuid.uuid4()), campaign_id, "user", query, is_ques, now)
         save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
         create_campaign(campaign_id, query[:50], now, 2, is_ques, query[:100])
-        
+
         return jsonify({"campaign_id": campaign_id, "response": format_response(response), "intent": intent})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -190,45 +196,45 @@ def chat(campaign_id):
         message = data.get("message")
         if not message:
             return jsonify({"error": "खाली मैसेज"}), 400
-        
+
         valid, msg = validate_message(message)
         if not valid:
             return jsonify({"error": msg}), 400
-        
+
         message = sanitize_text(message)
         campaign = get_campaign(campaign_id)
         if not campaign:
             return jsonify({"error": "चैट नहीं मिली"}), 404
         if campaign.get("is_deleted"):
             return jsonify({"error": "चैट डिलीट हो चुकी है"}), 400
-        
+
         now = datetime.utcnow().isoformat()
         is_ques = 1 if is_question(message) else 0
-        
+
         all_history = get_all_history(campaign_id)
         recent_history = get_recent_history(campaign_id, 20)
         intent = detect_intent(message, recent_history)
-        
+
         # Handle rename command
         if message.lower().startswith("rename "):
             new_name = message[7:].strip()
             if new_name:
                 rename_campaign(campaign_id, new_name)
                 return jsonify({"response": f"✅ चैट का नाम बदलकर **{new_name}** कर दिया गया!", "intent": "rename"})
-        
+
         # Handle delete command
         elif message.lower().strip() == "delete":
             delete_campaign(campaign_id, now)
             return jsonify({"response": "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।", "intent": "delete", "deleted": True})
-        
+
         response = generate_response(intent, message, recent_history, all_history, campaign_id)
-        
+
         save_message(str(uuid.uuid4()), campaign_id, "user", message, is_ques, now)
         save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
-        
+
         new_question_count = count_questions(campaign_id)
         update_campaign(campaign_id, now, 2, new_question_count, message[:100])
-        
+
         return jsonify({"response": format_response(response), "intent": intent, "question_count": new_question_count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -261,6 +267,10 @@ def restore_campaign_route(campaign_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ====================================================================
+# ROUTES - Blog
+# ====================================================================
+
 @app.route("/blog/<slug>")
 def blog(slug):
     try:
@@ -271,12 +281,8 @@ def blog(slug):
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
-
-
 # ====================================================================
-# HEALTH SERVICE ROUTES (NEW)
+# ROUTES - Health Service
 # ====================================================================
 
 @app.route("/health/full")
@@ -469,3 +475,8 @@ def health_dashboard():
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
 
 # ====================================================================
+# RUN
+# ====================================================================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
