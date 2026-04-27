@@ -1,12 +1,8 @@
+# ai_service.py - ENHANCED VERSION (FIXED)
 # ====================================================================
-# 📁 FILE: ai_service.py (ENHANCED VERSION - WORKING)
+# 📁 FILE: ai_service.py
 # 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
-# 🔧 NEW FEATURES: 
-#    - "meri/my/apni" detection
-#    - Natural language GitHub commands
-#    - AI code generation for file creation
-#    - File location, size, metrics
-#    - Smart intent detection
+# 🔧 FIXED: Better intent detection + file name extraction
 # ====================================================================
 
 import requests
@@ -139,7 +135,7 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         return "❌ Error occurred. Please try again."
 
 
-# ================= ENHANCED INTENT DETECTION =================
+# ================= ENHANCED INTENT DETECTION (FIXED) =================
 def detect_intent(text, history=None):
     """Advanced intent detection with context and natural language"""
     t = text.lower()
@@ -158,18 +154,22 @@ def detect_intent(text, history=None):
         return "update_file"
     
     # ================= DELETE FILE INTENT =================
-    delete_keywords = ["delete", "हटाओ", "remove", "mitao", "delete karo", "hata do"]
+    delete_keywords = ["delete", "हटाओ", "remove", "mitao", "delete karo", "hata do", "delet"]
     if any(w in t for w in delete_keywords):
         return "delete_file"
     
-    # ================= READ FILE INTENT =================
-    read_keywords = ["दिखाओ", "read", "show", "dekho", "content", "dikhade", "dikha do", "batao", "kholo"]
+    # ================= READ FILE INTENT (FIXED) =================
+    read_keywords = ["दिखाओ", "read", "show", "dekho", "content", "dikhade", "dikha do", 
+                     "batao", "kholo", "ka code", "code dikhao", "code batao", "code dikhana",
+                     "dikhana", "code dekhna", "padhna", "padho"]
     if any(w in t for w in read_keywords):
         return "read_file"
     
-    # ================= LIST FILES INTENT =================
+    # ================= LIST FILES INTENT (FIXED) =================
     list_keywords = ["files list", "list files", "saari files", "all files", "file list", "meri files", 
-                     "github files", "files dikhao", "files batao", "saari filein", "sab files", "kitni files"]
+                     "github files", "files dikhao", "files batao", "saari filein", "sab files", 
+                     "kitni files", "kitni file", "total files", "total file", "file kitni",
+                     "files hain", "file hain", "files hai", "file hai", "sari files"]
     if any(w in t for w in list_keywords):
         return "list_files"
     
@@ -179,7 +179,7 @@ def detect_intent(text, history=None):
         return "github_test"
     
     # ================= REPO INFO =================
-    info_keywords = ["repo info", "repository info", "github info", "repo details"]
+    info_keywords = ["repo info", "repository info", "github info", "repo details", "repi info"]
     if any(w in t for w in info_keywords):
         return "repo_info"
     
@@ -202,13 +202,46 @@ def detect_intent(text, history=None):
     return "chat"
 
 
-# ================= HELPER FUNCTIONS =================
+# ================= HELPER FUNCTIONS (FIXED) =================
 def extract_file_name(message):
-    """Message se file name extract karo"""
+    """Message se file name extract karo - improved version"""
     words = message.split()
+    
+    # Pehle tarika: '.' wale words dhundho
     for word in words:
         if '.' in word and len(word) > 3:
             return word
+    
+    # Dusra tarika: "ai service.py" jaise multi-word file names
+    message_lower = message.lower()
+    # Known file names jo space ke saath aate hain
+    known_files = [
+        "ai service.py", "ai_service.py",
+        "github service.py", "github_service.py",
+        "blog service.py", "blog_service.py",
+        "health service.py", "health_service.py",
+        "tool map.items", "tool_map.items"
+    ]
+    for known in known_files:
+        if known in message_lower:
+            return known.replace(" ", "_") if " " in known else known
+    
+    # Teesra tarika: "config.py" ko "config" se dhundho
+    known_simple = ["config", "app", "db", "helpers", "sample", "par", "requirements", "readme"]
+    for name in known_simple:
+        if name in message_lower:
+            # Check karo ki ye file extension ke saath hai ya nahi
+            for word in words:
+                if name in word.lower() and '.' in word:
+                    return word
+            # Agar nahi mila to common extension add karo
+            if name in ["config", "app", "db", "helpers", "sample", "par"]:
+                return f"{name}.py"
+            elif name == "requirements":
+                return "requirements.txt"
+            elif name == "readme":
+                return "README.md"
+    
     return None
 
 
@@ -245,10 +278,12 @@ def generate_blog(topic):
 def generate_response(intent, message, history, all_history, campaign_id=None):
     """Generate smart response with full context - WORKING VERSION"""
     
-    # Force check
+    # Force check (FIXED)
     words = message.lower().split()
     has_file = any('.' in w and len(w) > 3 for w in words)
-    has_read = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content"])
+    has_read = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content", 
+                                                    "ka code", "code dikhao", "code batao",
+                                                    "dikhana", "padhna", "padho"])
     
     if has_file and has_read and intent == "chat":
         intent = "read_file"
@@ -405,6 +440,8 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= ORIGINAL INTENTS =================
     elif intent == "count_questions":
+        if campaign_id:
+            return f"📊 Total questions: {count_questions(campaign_id)}"
         return f"📊 Total questions: {count_questions()}"
     
     elif intent == "list_questions":
