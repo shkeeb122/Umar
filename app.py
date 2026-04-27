@@ -1,4 +1,4 @@
-# app.py - COMPLETE WORKING VERSION
+# app.py - COMPLETE WORKING VERSION (FIXED)
 # ====================================================================
 # 📁 FILE: app.py
 # 🎯 ROLE: BOSS - Sab requests handle karta hai, routes manage karta hai
@@ -50,8 +50,10 @@ def get_uptime():
 def get_database_size():
     """Get database file size"""
     try:
-        if os.path.exists("ai_system.db"):
-            size = os.path.getsize("ai_system.db")
+        # 🔧 FIX: Ab permanent path se size check karo
+        from db import DB_FILE
+        if os.path.exists(DB_FILE):
+            size = os.path.getsize(DB_FILE)
             if size < 1024:
                 return f"{size} bytes"
             elif size < 1024 * 1024:
