@@ -1,10 +1,11 @@
-# db.py - COMPLETE WORKING VERSION WITH MAP
+# db.py - COMPLETE WORKING VERSION WITH MAP (FIXED)
 # ====================================================================
 # 📁 FILE: db.py
 # 🎯 ROLE: MEMORY - Saara data store karta hai
 # 🔗 USED BY: app.py, ai_service.py, blog_service.py
 # 📊 TOTAL TABLES: 6
 # 📋 TOTAL COLUMNS: 42
+# 🔧 FIX: Database ab Render Permanent Disk par save hoti hai
 # ====================================================================
 
 import sqlite3
@@ -14,6 +15,17 @@ import os
 
 conn = None
 cursor = None
+
+# ====================================================================
+# 🔧 FIX: DATABASE PATH (Render Permanent Disk)
+# ====================================================================
+# Pehle: "ai_system.db" (temporary - deploy par delete ho jata tha)
+# Ab: "/var/data/ai_system.db" (permanent - deploy ke baad bhi safe)
+# ====================================================================
+DATABASE_PATH = os.environ.get("RENDER_DISK_PATH", "/var/data")
+if not os.path.exists(DATABASE_PATH):
+    os.makedirs(DATABASE_PATH, exist_ok=True)
+DB_FILE = os.path.join(DATABASE_PATH, "ai_system.db")
 
 # ====================================================================
 # 📊 DATABASE MAP - Complete documentation
@@ -159,9 +171,11 @@ def init_db():
     print("🚀 SMART DATABASE INITIALIZATION")
     print("=" * 70)
     print(f"📌 Target Version: {DB_VERSION}")
+    print(f"📁 Database Path: {DB_FILE}")
     print("=" * 70)
     
-    conn = sqlite3.connect("ai_system.db", check_same_thread=False)
+    # 🔧 FIX: Permanent path use karo (pehle "ai_system.db" tha)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
     
     # SECTION 1: CREATE BASE TABLES
@@ -209,6 +223,7 @@ def init_db():
     
     conn.commit()
     print("\n✅ DATABASE INITIALIZATION COMPLETE! (Old data SAFE, New features ADDED)")
+    print(f"📁 Database permanently stored at: {DB_FILE}")
 
 # ====================================================================
 # DATABASE INFO FUNCTIONS
