@@ -1,0 +1,175 @@
+{
+  "system_name": "AI Ultimate Pro",
+  "version": "6.0",
+  "last_updated": "2026-04-27",
+  "total_files": 8,
+  "deployment_order": {
+    "description": "Files ko isi order mein push/update karna chahiye. Jo jis par depend hai, wo pehle.",
+    "order": [
+      "config.py",
+      "db.py",
+      "helpers.py",
+      "github_service.py",
+      "ai_service.py",
+      "blog_service.py",
+      "health_service.py",
+      "app.py",
+      "system_map.json"
+    ]
+  },
+  "files": {
+    "config.py": {
+      "role": "Settings",
+      "description": "Saare API keys, URLs aur global settings. Kisi par depend nahi, sab ise use karte hain.",
+      "priority": "critical",
+      "depends_on": [],
+      "used_by": ["db.py", "helpers.py", "github_service.py", "ai_service.py", "blog_service.py", "health_service.py", "app.py"],
+      "classes": [],
+      "functions": [],
+      "variables": [
+        "MISTRAL_API_KEY", "MISTRAL_URL", "MODEL_NAME", "HEADERS", "BACKEND_URL",
+        "DATABASE_FILE", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_TOKEN"
+      ],
+      "file_size_kb": 1.2,
+      "total_lines": 35
+    },
+    "db.py": {
+      "role": "Memory",
+      "description": "SQLite database manager. Saara chat data, blogs, campaigns, generated content yahan save hota hai.",
+      "priority": "critical",
+      "depends_on": ["config.py"],
+      "used_by": ["app.py", "ai_service.py", "blog_service.py"],
+      "classes": [],
+      "functions": [
+        "safe_add_column", "safe_create_table", "init_db",
+        "show_database_map", "check_database_health", "fix_common_issues",
+        "get_cursor", "commit",
+        "create_campaign", "get_campaigns", "get_campaign", "update_campaign",
+        "rename_campaign", "delete_campaign", "restore_campaign",
+        "save_message", "get_all_history", "get_recent_history", "count_questions", "get_all_user_messages",
+        "save_blog_enhanced", "get_blog_by_slug_enhanced", "get_blog_by_slug", "get_all_blogs", "get_blog_by_id", "get_related_blogs",
+        "save_blog", "save_generated_content"
+      ],
+      "tables": ["campaigns", "messages", "blogs_enhanced", "posts", "generated_content", "deleted_chats", "system_version"],
+      "file_size_kb": 15.4,
+      "total_lines": 420
+    },
+    "helpers.py": {
+      "role": "Tools",
+      "description": "Text formatting, validation, slug creation jaise chhote-mote helper functions.",
+      "priority": "high",
+      "depends_on": [],
+      "used_by": ["app.py", "ai_service.py", "blog_service.py"],
+      "classes": [],
+      "functions": [
+        "calculate_reading_time", "is_question", "format_response",
+        "sanitize_text", "validate_message", "extract_topic", "create_slug"
+      ],
+      "file_size_kb": 3.5,
+      "total_lines": 85
+    },
+    "github_service.py": {
+      "role": "Hands",
+      "description": "GitHub API se directly interact karta hai. Files create, read, update, delete aur list karta hai.",
+      "priority": "high",
+      "depends_on": ["config.py"],
+      "used_by": ["ai_service.py"],
+      "classes": ["GitHubService"],
+      "functions": [
+        "test_connection", "create_file", "read_file",
+        "update_file", "delete_file", "list_files", "create_test_file", "get_repo_info"
+      ],
+      "file_size_kb": 9.2,
+      "total_lines": 260
+    },
+    "ai_service.py": {
+      "role": "Brain",
+      "description": "System ka dimag. User ke message ka intent detect karta hai, AI se baat karta hai, aur response generate karta hai.",
+      "priority": "critical",
+      "depends_on": ["config.py", "db.py", "helpers.py", "github_service.py"],
+      "used_by": ["app.py"],
+      "classes": [],
+      "functions": [
+        "generate_code_with_ai", "analyze_file_structure", "get_file_metrics",
+        "ai_chat", "detect_intent", "extract_file_name", "extract_topic_from_message",
+        "extract_code_from_message", "generate_blog", "generate_response"
+      ],
+      "file_size_kb": 18.7,
+      "total_lines": 530
+    },
+    "blog_service.py": {
+      "role": "Writer",
+      "description": "Blog posts generate aur HTML format karta hai. SEO-friendly structure.",
+      "priority": "medium",
+      "depends_on": ["config.py", "db.py", "helpers.py"],
+      "used_by": ["app.py"],
+      "classes": [],
+      "functions": [
+        "publish_blog", "generate_excerpt", "extract_tags_from_content",
+        "generate_featured_image", "format_blog_content", "get_blog_html",
+        "generate_blog_html_page", "generate_related_blogs_html", "escape_html"
+      ],
+      "file_size_kb": 13.1,
+      "total_lines": 380
+    },
+    "health_service.py": {
+      "role": "Doctor",
+      "description": "System health check, problem detection aur auto-fix karta hai.",
+      "priority": "medium",
+      "depends_on": ["config.py", "db.py"],
+      "used_by": ["app.py"],
+      "classes": [],
+      "functions": [
+        "discover_files", "discover_functions", "discover_tables", "discover_columns", "discover_routes",
+        "check_file_problems", "check_database_problems", "check_api_problems",
+        "auto_fix_all", "get_full_health_report", "get_quick_status", "print_report"
+      ],
+      "file_size_kb": 14.2,
+      "total_lines": 420
+    },
+    "app.py": {
+      "role": "Boss",
+      "description": "Main Flask server. Frontend se connection aur saare routes yahi se manage hote hain.",
+      "priority": "critical",
+      "depends_on": ["config.py", "db.py", "helpers.py", "ai_service.py", "blog_service.py", "health_service.py"],
+      "used_by": [],
+      "classes": [],
+      "functions": [
+        "check_database", "get_uptime", "get_database_size",
+        "home", "health", "ping", "status", "campaigns",
+        "get_campaign_details", "command", "chat", "rename_campaign_route",
+        "delete_campaign_route", "restore_campaign_route", "blog",
+        "health_full", "health_quick", "health_fix", "health_dashboard"
+      ],
+      "routes": [
+        "/", "/health", "/ping", "/status", "/campaigns", "/campaign/<campaign_id>",
+        "/command", "/chat/<campaign_id>", "/campaign/rename/<campaign_id>",
+        "/campaign/delete/<campaign_id>", "/campaign/restore/<campaign_id>", "/blog/<slug>",
+        "/health/full", "/health/quick", "/health/fix", "/health/dashboard"
+      ],
+      "file_size_kb": 16.8,
+      "total_lines": 490
+    }
+  },
+  "dependency_graph": {
+    "_comment": "Yeh batata hai ki kaun si file kis par depend karti hai.",
+    "config.py": [],
+    "db.py": ["config.py"],
+    "helpers.py": [],
+    "github_service.py": ["config.py"],
+    "ai_service.py": ["config.py", "db.py", "helpers.py", "github_service.py"],
+    "blog_service.py": ["config.py", "db.py", "helpers.py"],
+    "health_service.py": ["config.py", "db.py"],
+    "app.py": ["config.py", "db.py", "helpers.py", "ai_service.py", "blog_service.py", "health_service.py"]
+  },
+  "new_file_template": {
+    "_comment": "Jab system koi nayi file banaye to is structure ko follow kare.",
+    "header": "# ====================================================================\n# 📁 FILE: {file_name}\n# 🎯 ROLE: {role}\n# 🔗 USES: {imports}\n# 🔗 CALLED BY: {used_by}\n# ====================================================================",
+    "required_imports": ["config"],
+    "optional_imports": ["db", "helpers"],
+    "if_route_needed": "Add route in app.py",
+    "if_github_action": "Use github_service.py",
+    "if_ai_feature": "Use ai_service.py",
+    "update_system_map": true
+  }
+}
