@@ -12,6 +12,10 @@ from datetime import datetime
 import uuid
 import os
 
+# ================= ADDED LINE 1 =================
+# 🔥 GITHUB BACKUP SYSTEM IMPORT
+from db_backup import auto_backup_check, restore_from_github
+
 conn = None
 cursor = None
 
@@ -207,6 +211,11 @@ def init_db():
     except Exception as e:
         print(f"   ⚠️ Version tracking: {e}")
     
+    # ================= ADDED LINE 2 =================
+    # 🔥 RESTORE FROM GITHUB BACKUP (Data safe!)
+    print("\n🔄 Checking GitHub backup...")
+    restore_from_github()
+    
     conn.commit()
     print("\n✅ DATABASE INITIALIZATION COMPLETE! (Old data SAFE, New features ADDED)")
 
@@ -374,6 +383,11 @@ def save_message(msg_id, campaign_id, role, content, is_question, timestamp):
         cursor.execute("INSERT INTO messages (id, campaign_id, role, content, is_question, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
                       (msg_id, campaign_id, role, content, is_question, timestamp))
         commit()
+        
+        # ================= ADDED LINE 3 =================
+        # 🔥 AUTO BACKUP CHECK (Background mein backup hoga, zero delay!)
+        auto_backup_check()
+        
         return True
     except Exception as e:
         print(f"❌ Error saving message: {e}")
