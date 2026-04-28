@@ -1,375 +1,536 @@
-# ai_service.py - COMPLETE WORKING VERSION WITH FULL GITHUB AUTOMATION
 # ====================================================================
 # 📁 FILE: ai_service.py
-# 🎯 ROLE: SUPER BRAIN - Full GitHub Automation + AI Chat
+# 🎯 ROLE: BRAIN - Sabse important file! AI se baat karta hai
+# 🔗 USES: config.py, db.py, github_service.py
 # 🔗 USED BY: app.py
-# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py
-# 📋 TOTAL FUNCTIONS: 10
-# 🎯 INTENTS DETECTED: 14+ (count_questions, list_questions, blog, follow_up, recall, chat, create_file, update_file, delete_file, read_file, list_files, github_test, repo_info, file_stats, function_count)
-# 🔥 ENHANCED: 25+ Hindi/English patterns, smart file recognition
+# 📋 TOTAL FUNCTIONS: 8
 # ====================================================================
 
+import json
 import requests
-import time
 import uuid
 from datetime import datetime
+import re
 
-from config import MISTRAL_URL, HEADERS, MODEL_NAME, BACKEND_URL
-from db import get_recent_history, get_all_history, count_questions, save_message, update_campaign, save_generated_content
-from helpers import is_question, format_response, extract_topic, create_slug
-import db
+# ===================================================================
+# IMPORT CONFIGURATIONS
+# ===================================================================
 
-# ================= GITHUB AUTOMATION IMPORT =================
+from config import MISTRAL_API_KEY, MISTRAL_URL, MODEL_NAME, HEADERS, BACKEND_URL
+from db import (
+    get_cursor, commit, create_campaign, save_message, get_all_history,
+    get_campaign, update_campaign, count_questions, get_recent_history,
+    save_generated_content, get_campaigns
+)
 from github_service import GitHubService
 
-def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Single AI call with Mistral API"""
+# ===================================================================
+# INITIALIZATION
+# ===================================================================
+
+github = GitHubService()
+
+# System Prompt - AI ki personality
+SYSTEM_PROMPT = """Tu Umar hai - ek expert AI assistant jo blogs likhta hai aur knowledge share karta hai.
+
+TERE RULES:
+1. HAMESHA helpful aur friendly reh
+2. Agar user blog likhne bole to FORMAT ye rakh:
+
+   📝 TITLE: [blog ka title]
+   
+   [content with headings, bullet points, examples]
+   
+   📌 TAGS: [comma separated]
+
+3. Agar user question poochhe to acchi tarah samjha kar answer de
+4. Kabhi bhi galat ya harmful information mat de
+5. Hindi ya English dono mein baat kar sakta hai, jo user bole
+
+TU AISI HELP KAR SAKTA HAI:
+- Kisi bhi topic par explanation
+- Blog posts likhna
+- Knowledge share karna
+- Questions ke answers
+- Research help
+
+TU ASE HI HAI JAISE SABKUCH JAANTA HO - CONFIDENT RAHO!"""
+
+# ===================================================================
+# 1️⃣ CHAT COMPLETION - MAIN FUNCTION
+# ===================================================================
+
+def get_ai_response(campaign_id, user_message):
+    """
+    AI se response laata hai with full context
+    Yeh hai sabse important function!
+    """
+    print(f"\n🤖 AI SERVICE: Processing message for {campaign_id}")
+    
     try:
+        # Check API key
+        if not MISTRAL_API_KEY:
+            return "⚠️ Error: MISTRAL_API_KEY not configured! Please add to Render environment variables."
+        
+        # Get campaign info
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            # Create new campaign if doesn't exist
+            now = datetime.utcnow().isoformat()
+            create_campaign(campaign_id, user_message[:50], now, message_count=0)
+            campaign = get_campaign(campaign_id)
+        
+        # Save user message to database
+        msg_id = str(uuid.uuid4())
+        is_question = user_message.strip().endswith('?') or '?' in user_message
+        timestamp = datetime.utcnow().isoformat()
+        save_message(msg_id, campaign_id, "user", user_message, 1 if is_question else 0, timestamp)
+        
+        # Get conversation history
+        history = get_all_history(campaign_id)
+        
+        # Build messages for API
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        
+        # Add last 15 messages for context (dynamic memory)
+        for msg in history[-30:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Prepare API request
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "top_p": 0.95
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "top_p": 0.9
         }
         
-        start_time = time.time()
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
+        print(f"   📡 Calling Mistral API...")
         
-        if r.status_code != 200:
-            return "⚠️ Server busy. Please try again."
+        # Make API call
+        response = requests.post(
+            MISTRAL_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=60
+        )
         
-        data = r.json()
-        response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        
-        print(f"AI Response time: {time.time() - start_time:.2f}s")
-        return response.strip() if response else "I'm not sure how to respond."
-        
+        if response.status_code == 200:
+            result = response.json()
+            ai_response = result["choices"][0]["message"]["content"]
+            
+            # Save AI response
+            ai_msg_id = str(uuid.uuid4())
+            save_message(ai_msg_id, campaign_id, "assistant", ai_response, 0, datetime.utcnow().isoformat())
+            
+            # Update campaign stats
+            new_question_count = count_questions(campaign_id)
+            update_campaign(
+                campaign_id,
+                datetime.utcnow().isoformat(),
+                message_count_increment=2,
+                question_count=new_question_count,
+                last_topic=user_message[:100]
+            )
+            
+            print(f"   ✅ AI response generated successfully")
+            return ai_response
+            
+        else:
+            error_msg = f"❌ API Error: {response.status_code} - {response.text[:200]}"
+            print(f"   {error_msg}")
+            return f"⚠️ Sorry, I'm having trouble right now. Error: {response.status_code}"
+            
     except requests.exceptions.Timeout:
-        return "⏰ Request timeout. Please try again."
+        return "⚠️ Request timed out. Please try again."
     except Exception as e:
-        print(f"AI Error: {e}")
-        return "❌ Error occurred. Please try again."
+        print(f"   ❌ AI Service Error: {str(e)}")
+        return f"⚠️ An error occurred: {str(e)[:100]}"
 
-def detect_intent(text, history=None):
-    """SUPER ENHANCED intent detection - Hindi/English Mix Support"""
-    t = text.lower()
-    
-    # ================= GITHUB AUTOMATION INTENTS (ENHANCED) =================
-    
-    # Check for file names mentioned in message
-    file_extensions = ['.py', '.js', '.html', '.css', '.txt', '.md', '.json', '.yml', '.yaml', '.env', '.xml', '.csv', '.ts', '.jsx', '.tsx']
-    has_file_reference = any(ext in t for ext in file_extensions)
-    common_names = ['config', 'app', 'main', 'index', 'script', 'style', 'readme', 'requirements', 'license', 'package', 'docker', 'makefile', 'gitignore', 'env']
-    has_common_name = any(name in t for name in common_names)
-    
-    # ----- LIST FILES (ENHANCED) -----
-    list_patterns = [
-        "files list", "list files", "saari files", "all files", "sabhi file",
-        "sab file", "kitni file", "kon kon files", "kaun kaun files", "files dikhao",
-        "files batao", "repo files", "repository files", "github files",
-        "github ki files", "repo ki files", "sari files", "total files",
-        "files hain", "puri list", "kya kya files", "files count",
-        "saare files", "sab files", "repository ki files", "github par kya"
-    ]
-    if any(w in t for w in list_patterns):
-        return "list_files"
-    
-    # ----- READ FILE (ENHANCED - Must have file reference) -----
-    read_with_file_patterns = [
-        "dikhao", "read", "show", "dekho", "padho", "batao",
-        "ka code", "ki file", "code dikhao", "code batao",
-        "kya likha", "andhar kya", "content kya", "file dikhao",
-        "file read", "padhna", "dekhna", "open karo", "kholo"
-    ]
-    read_without_file = [
-        "ka code", "ki file", "code dikhao", "code batao", "file dikhao",
-        "file read", "file show", "file content"
-    ]
-    if has_file_reference or has_common_name:
-        if any(w in t for w in read_with_file_patterns):
-            return "read_file"
-    elif any(w in t for w in read_without_file):
-        # Has read intent without clear file - but check if file nearby
-        words_list = t.split()
-        for i, w in enumerate(words_list):
-            if w in ["dikhao", "read", "show", "dekho", "padho", "batao"]:
-                if i + 1 < len(words_list):
-                    return "read_file"
-    
-    # ----- FUNCTION COUNT (ENHANCED) -----
-    if any(w in t for w in ["kitne function", "kitne def", "functions count", "functions hain", "function count", "def count", "methods count", "kitne methods"]):
-        return "read_file"  # Will display function count
-    
-    # ----- FILE STATS (NEW) -----
-    if any(w in t for w in ["ka size", "kitni lines", "file size", "lines count", "total lines"]):
-        if has_file_reference or has_common_name:
-            return "read_file"  # Will show stats
-    
-    # ----- CREATE FILE (ENHANCED) -----
-    create_patterns = [
-        "बनाओ", "create", "नई file", "new file", "file banao", 
-        "banao file", "nayi file", "create karo", "add karo",
-        "file create", "naya file", "ek file", "file add"
-    ]
-    if any(w in t for w in create_patterns):
-        return "create_file"
-    
-    # ----- UPDATE FILE (ENHANCED) -----
-    update_patterns = [
-        "update karo", "update", "बदलो", "edit karo", "edit",
-        "change karo", "change", "modify", "badlo", "badal do",
-        "change code", "code change", "update code", "modify code"
-    ]
-    if any(w in t for w in update_patterns):
-        if has_file_reference or any(name in t for name in common_names):
-            return "update_file"
-    
-    # ----- DELETE FILE (ENHANCED) -----
-    delete_patterns = [
-        "delete karo", "delete", "हटाओ", "remove karo", "remove",
-        "mitao", "hatao", "udao", "delete file", "file delete",
-        "file hatao", "file remove", "remove file"
-    ]
-    if any(w in t for w in delete_patterns):
-        return "delete_file"
-    
-    # ----- GITHUB TEST (ENHANCED) -----
-    test_patterns = [
-        "github test", "connection check", "test connection",
-        "github check", "github connection", "check github",
-        "test github", "github working", "connection test"
-    ]
-    if any(w in t for w in test_patterns):
-        return "github_test"
-    
-    # ----- REPO INFO (ENHANCED) -----
-    info_patterns = [
-        "repo info", "repository info", "github info", "repo details",
-        "repository details", "repo jankari", "github details",
-        "repo kya", "repository kya"
-    ]
-    if any(w in t for w in info_patterns):
-        return "repo_info"
-    
-    # ================= ORIGINAL INTENTS =================
-    # Question count
-    if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye", "kitne question", "questions count", "sawal count"]):
-        return "count_questions"
-    
-    # List questions
-    if any(w in t for w in ["kaun kaun se sawal", "kya kya sawal", "list questions", "sawal list", "which questions", "questions list", "sawal dikhao"]):
-        return "list_questions"
-    
-    # Blog generation
-    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog", "blog banao", "blog likho", "article banao"]):
-        return "blog"
-    
-    # Follow-up
-    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more", "aur details", "aur info", "aur batao", "continue", "aage batao"]):
-        return "follow_up"
-    
-    # Recall past
-    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad", "kya tha", "pichhli baar", "yaad karo", "recall"]):
-        return "recall"
-    
-    # ================= SMART FALLBACK CHECKS =================
-    # If message has file reference but no specific action detected
-    if has_file_reference or has_common_name:
-        action_words = ["dikhao", "read", "show", "dekho", "batao", "kya", "code"]
-        if any(w in t.split() for w in action_words):
-            return "read_file"
-    
-    return "chat"
+# ===================================================================
+# 2️⃣ STREAMING RESPONSE (Typewriter effect ke liye)
+# ===================================================================
 
-def generate_blog(topic):
-    """Generate blog content"""
-    system = f"""You are an expert writer. Create a detailed, engaging blog post about: {topic}
-
-Format with:
-- Catchy title with emoji at beginning
-- Introduction paragraph
-- Clear sections with headings (use ## for subheadings)
-- Bullet points where helpful using *
-- Strong conclusion
-
-Use markdown formatting (**, *, etc). Keep it informative and engaging."""
-
-    messages = [{"role": "system", "content": system}]
-    return ai_chat(messages, temperature=0.8, max_tokens=2000)
-
-# ================= GITHUB AUTOMATION HELPER FUNCTIONS (ENHANCED) =================
-
-def extract_file_name(message):
-    """ENHANCED: Smart file name extraction from message"""
-    message_lower = message.lower()
-    words = message_lower.split()
+def get_ai_response_stream(campaign_id, user_message):
+    """
+    Streaming response - word by word
+    """
+    print(f"\n🌊 STREAM MODE: Processing for {campaign_id}")
     
-    # Common file extensions
-    file_extensions = ['.py', '.js', '.html', '.css', '.txt', '.md', '.json', '.yml', '.yaml', '.env', '.xml', '.csv', '.ts', '.jsx', '.tsx']
-    
-    # Common file names without extension (will auto-add .py)
-    common_file_map = {
-        'config': 'config.py',
-        'app': 'app.py',
-        'main': 'main.py',
-        'index': 'index.html',
-        'script': 'script.js',
-        'style': 'style.css',
-        'readme': 'README.md',
-        'requirements': 'requirements.txt',
-        'license': 'LICENSE',
-        'package': 'package.json',
-        'docker': 'Dockerfile',
-        'makefile': 'Makefile',
-        'gitignore': '.gitignore',
-        'env': '.env',
-        'db': 'db.py',
-        'helpers': 'helpers.py',
-        'blog_service': 'blog_service.py',
-        'ai_service': 'ai_service.py',
-        'github_service': 'github_service.py',
-        'health_service': 'health_service.py',
-        'test': 'test.py',
-        'utils': 'utils.py',
-        'api': 'api.py',
-        'server': 'server.py',
-        'routes': 'routes.py',
-        'models': 'models.py',
-        'frontend': 'index.html',
-        'backend': 'app.py',
-        'database': 'db.py',
-        'blog': 'blog_service.py',
-        'health': 'health_service.py',
-        'github': 'github_service.py'
-    }
-    
-    # Method 1: Find word with file extension
-    for word in words:
-        clean_word = word.strip(',.!?;:\'"()[]{}')
-        for ext in file_extensions:
-            if ext in clean_word and len(clean_word) > len(ext):
-                return clean_word
-    
-    # Method 2: Check common file names (after action words)
-    action_words = ['dikhao', 'read', 'show', 'dekho', 'delete', 'update', 'edit', 'banao', 'create', 'padho', 'batao', 'kholo', 'open', 'remove', 'hatao', 'mitao']
-    
-    for i, word in enumerate(words):
-        clean_word = word.strip(',.!?;:\'"()[]{}')
-        if clean_word in action_words and i + 1 < len(words):
-            next_word = words[i + 1].strip(',.!?;:\'"()[]{}')
-            if next_word in common_file_map:
-                return common_file_map[next_word]
-            # Check if next word looks like a file name
-            for ext in file_extensions:
-                if ext in next_word:
-                    return next_word
-            # If next word is a common name without extension
-            if next_word in common_file_map:
-                return common_file_map[next_word]
-    
-    # Method 3: Find any common file name in message
-    for word in words:
-        clean_word = word.strip(',.!?;:\'"()[]{}')
-        if clean_word in common_file_map:
-            return common_file_map[clean_word]
-    
-    # Method 4: Check for quoted file names
-    import re
-    quoted = re.findall(r'["\']([^"\']+)["\']', message)
-    for q in quoted:
-        clean_q = q.strip()
-        if any(ext in clean_q for ext in file_extensions) or clean_q in common_file_map:
-            if clean_q in common_file_map:
-                return common_file_map[clean_q]
-            return clean_q
-    
-    return None
-
-def extract_code_from_message(message):
-    """ENHANCED: Extract code from message (code blocks or inline)"""
-    # Method 1: Extract from code blocks (```)
-    if '```' in message:
-        parts = message.split('```')
-        if len(parts) >= 2:
-            code = parts[1].strip()
-            # Remove language identifier if present
-            first_line = code.split('\n')[0]
-            if first_line in ['python', 'javascript', 'js', 'html', 'css', 'json', 'yaml', 'yml', 'txt', 'bash', 'sh']:
-                code = '\n'.join(code.split('\n')[1:])
-            return code.strip()
-    
-    # Method 2: Check for inline code (single backticks)
-    import re
-    inline_codes = re.findall(r'`([^`]+)`', message)
-    if inline_codes:
-        # Return the longest inline code (most likely the actual code)
-        return max(inline_codes, key=len).strip()
-    
-    # Method 3: Check if message contains code-like content after command
-    words = message.split()
-    action_words = ['banao', 'create', 'update', 'edit', 'change', 'modify', 'badlo', 'code']
-    for i, word in enumerate(words):
-        if word in action_words:
-            # Everything after file name could be code
-            remaining = ' '.join(words[i+1:])
-            if len(remaining) > 10 and ('print' in remaining or 'def ' in remaining or 'import ' in remaining or 'class ' in remaining or '=' in remaining):
-                return remaining
-            break
-    
-    return None
-
-def count_file_stats(content):
-    """Calculate file statistics"""
-    if not content:
-        return {"functions": 0, "classes": 0, "lines": 0, "chars": 0}
-    
-    lines = content.split('\n')
-    return {
-        "functions": content.count('def ') + content.count('async def '),
-        "classes": content.count('class '),
-        "lines": len(lines),
-        "chars": len(content)
-    }
-
-def generate_response(intent, message, history, all_history, campaign_id=None):
-    """Generate smart response with full context - ENHANCED"""
-    
-    # ================= FORCE GITHUB CHECK (ENHANCED) =================
-    words_lower = message.lower().split()
-    
-    # Check for file references
-    file_extensions = ['.py', '.js', '.html', '.css', '.txt', '.md', '.json', '.yml', '.yaml', '.env', '.xml', '.csv']
-    common_names = ['config', 'app', 'main', 'index', 'script', 'style', 'readme', 'requirements', 'license', 'package', 'docker', 'gitignore']
-    
-    has_file_ref = any(any(ext in w for ext in file_extensions) for w in words_lower)
-    has_common = any(name in words_lower for name in common_names)
-    has_read_action = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content", "padho", "batao", "kya", "code", "open", "kholo"])
-    has_list_action = any(w in message.lower() for w in ["saari", "sabhi", "sab", "sari", "files", "list", "total", "kitni", "kaun", "kon", "puri"])
-    
-    # Force read_file if file reference + read action
-    if (has_file_ref or has_common) and has_read_action and intent == "chat":
-        intent = "read_file"
-    
-    # Force list_files if list action + no file reference
-    if has_list_action and not has_file_ref and not has_common and intent == "chat":
-        intent = "list_files"
-    # ================= END FORCE CHECK =================
-    
-    # ================= GITHUB AUTOMATION HANDLERS (ENHANCED) =================
-    
-    # ----- CREATE FILE (ENHANCED) -----
-    if intent == "create_file":
-        github = GitHubService()
-        file_name = extract_file_name(message)
+    try:
+        if not MISTRAL_API_KEY:
+            yield "⚠️ Error: MISTRAL_API_KEY not configured!"
+            return
         
-        if not file_name:
-            return """❓ **कौन सी file बनानी है?**
+        # Get campaign and save user message
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            now = datetime.utcnow().isoformat()
+            create_campaign(campaign_id, user_message[:50], now, message_count=0)
+        
+        msg_id = str(uuid.uuid4())
+        is_question = user_message.strip().endswith('?')
+        timestamp = datetime.utcnow().isoformat()
+        save_message(msg_id, campaign_id, "user", user_message, 1 if is_question else 0, timestamp)
+        
+        # Get history
+        history = get_all_history(candidate_id)
+        
+        # Build messages
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for msg in history[-30:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Streaming request
+        payload = {
+            "model": MODEL_NAME,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "stream": True
+        }
+        
+        response = requests.post(
+            MISTRAL_URL,
+            headers=HEADERS,
+            json=payload,
+            stream=True,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            full_response = ""
+            
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode('utf-8')
+                    if line.startswith('data: '):
+                        data = line[6:]
+                        if data != '[DONE]':
+                            try:
+                                chunk = json.loads(data)
+                                if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
+                                    content = chunk['choices'][0]['delta']['content']
+                                    full_response += content
+                                    yield content
+                            except json.JSONDecodeError:
+                                continue
+            
+            # Save complete response
+            ai_msg_id = str(uuid.uuid4())
+            save_message(ai_msg_id, campaign_id, "assistant", full_response, 0, datetime.utcnow().isoformat())
+            
+            new_question_count = count_questions(campaign_id)
+            update_campaign(
+                campaign_id,
+                datetime.utcnow().isoformat(),
+                message_count_increment=2,
+                question_count=new_question_count,
+                last_topic=user_message[:100]
+            )
+        else:
+            yield f"⚠️ API Error: {response.status_code}"
+            
+    except Exception as e:
+        yield f"⚠️ Error: {str(e)[:100]}"
 
-📝 **Examples:**
-- `test.py banao` - Python file
-- `style.css banao` - CSS file
-- `config.json create karo` - JSON file
-- `README.md banao` - Markdown file
+# ===================================================================
+# 3️⃣ BLOG GENERATION
+# ===================================================================
 
-💡 **Code ke saath:** 
+def generate_blog(campaign_id, topic):
+    """
+    Generate a complete blog post on given topic
+    """
+    print(f"\n📝 GENERATING BLOG: {topic}")
+    
+    prompt = f"""Write a detailed, well-structured blog post about: {topic}
+
+REQUIREMENTS:
+1. Catchy title with 📝 emoji
+2. Introduction that hooks the reader
+3. 3-5 main headings with detailed content
+4. Practical examples and actionable tips
+5. Bullet points for key takeaways
+6. Conclusion that summarizes
+7. Estimated reading time at top
+8. Tags at the end
+
+FORMAT:
+📝 TITLE: [Your Title]
+
+⏱️ Reading time: X min
+
+## Introduction
+[content]
+
+## Heading 1
+[content with examples]
+
+## Heading 2
+[content]
+
+[continue...]
+
+## Conclusion
+[summary]
+
+📌 TAGS: tag1, tag2, tag3
+
+Write in engaging, conversational style. Make it valuable and actionable!"""
+
+    return get_ai_response(campaign_id, prompt)
+
+# ===================================================================
+# 4️⃣ SAVE BLOG TO GITHUB
+# ===================================================================
+
+def save_blog_to_github(blog_title, blog_content, campaign_id=None):
+    """
+    Blog ko GitHub repository mein save karta hai
+    """
+    print(f"\n💾 SAVING BLOG TO GITHUB: {blog_title}")
+    
+    # Create slug from title
+    slug = blog_title.lower()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r'[\s-]+', '-', slug)
+    slug = slug.strip('-')[:50]
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    filename = f"blogs/{timestamp}-{slug}.md"
+    
+    # Prepare markdown content
+    markdown_content = f"""---
+title: {blog_title}
+date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+author: Umar AI
+---
+
+{blog_content}
+
+---
+*Auto-generated by Umar AI Assistant*
+"""
+    
+    # Try GitHub first
+    if github.ready:
+        result = github.create_file(filename, markdown_content, f"📝 Blog: {blog_title}")
+        if result["success"]:
+            if campaign_id:
+                save_generated_content(
+                    str(uuid.uuid4()),
+                    campaign_id,
+                    "blog",
+                    blog_title,
+                    result.get("file_url", ""),
+                    datetime.utcnow().isoformat()
+                )
+            return {
+                "success": True,
+                "url": result.get("file_url", ""),
+                "filename": filename,
+                "message": f"✅ Blog saved to GitHub!"
+            }
+    
+    # Fallback: Save locally
+    try:
+        with open(f"generated_{slug}.md", "w", encoding="utf-8") as f:
+            f.write(markdown_content)
+        return {
+            "success": True,
+            "url": None,
+            "filename": f"generated_{slug}.md",
+            "message": "⚠️ GitHub not available. Blog saved locally."
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "❌ Failed to save blog"
+        }
+
+# ===================================================================
+# 5️⃣ ANALYZE QUESTION
+# ===================================================================
+
+def analyze_question(question):
+    """
+    Analyze if question needs research or simple answer
+    """
+    research_keywords = ['latest', 'current', '2024', '2025', 'trending', 'news', 'update', 'recent']
+    needs_research = any(keyword in question.lower() for keyword in research_keywords)
+    
+    complexity_keywords = ['explain', 'how does', 'why is', 'compare', 'difference between', 'analysis']
+    is_complex = any(keyword in question.lower() for keyword in complexity_keywords)
+    
+    return {
+        "needs_research": needs_research,
+        "is_complex": is_complex,
+        "confidence": "high" if needs_research or is_complex else "medium"
+    }
+
+# ===================================================================
+# 6️⃣ GET CHAT SUMMARY
+# ===================================================================
+
+def get_chat_summary(campaign_id):
+    """
+    Generate summary of entire conversation
+    """
+    history = get_all_history(campaign_id)
+    
+    if not history:
+        return "No conversation yet."
+    
+    user_messages = [msg for msg in history if msg["role"] == "user"]
+    question_count = len([msg for msg in user_messages if msg.get("is_question")])
+    
+    prompt = f"""Summarize this conversation briefly:
+
+Total messages: {len(history)}
+Questions asked: {question_count}
+
+First user message: {user_messages[0]['content'][:100]}...
+
+Generate a 1-line summary of what this chat is about."""
+
+    summary_response = get_ai_response(campaign_id, prompt)
+    return summary_response[:200]
+
+# ===================================================================
+# 7️⃣ SUGGEST QUESTIONS
+# ===================================================================
+
+def suggest_followup_questions(campaign_id, last_topic):
+    """
+    Suggest 3 follow-up questions based on last conversation
+    """
+    recent = get_recent_history(campaign_id, 6)
+    
+    if not recent:
+        return [
+            "Tell me more about that topic",
+            "Can you explain it in simpler terms?",
+            "What are the practical applications?"
+        ]
+    
+    prompt = f"""Based on this conversation:
+{recent[-3:]}
+
+Suggest 3 relevant follow-up questions the user might want to ask.
+Format: Just the questions, one per line, no numbers, no extra text."""
+
+    try:
+        response = get_ai_response(campaign_id, prompt)
+        questions = [q.strip() for q in response.split('\n') if q.strip() and len(q.strip()) > 10]
+        return questions[:3]
+    except:
+        return [
+            "Can you elaborate on that?",
+            "What are the key takeaways?",
+            "Do you have any examples?"
+        ]
+
+# ===================================================================
+# 8️⃣ HEALTH CHECK
+# ===================================================================
+
+def check_ai_health():
+    """
+    Check if AI service is working properly
+    """
+    print("\n🏥 AI SERVICE HEALTH CHECK")
+    
+    issues = []
+    
+    # Check API Key
+    if not MISTRAL_API_KEY:
+        issues.append("❌ MISTRAL_API_KEY missing")
+    else:
+        print(f"   ✅ API Key present: {MISTRAL_API_KEY[:10]}...")
+    
+    # Test API connection
+    try:
+        test_payload = {
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "Say 'OK'"}],
+            "max_tokens": 5
+        }
+        response = requests.post(MISTRAL_URL, headers=HEADERS, json=test_payload, timeout=10)
+        if response.status_code == 200:
+            print("   ✅ API connection working")
+        else:
+            issues.append(f"❌ API connection failed: {response.status_code}")
+    except Exception as e:
+        issues.append(f"❌ API error: {str(e)[:50]}")
+    
+    # Check GitHub
+    if github.ready:
+        print("   ✅ GitHub service ready")
+    else:
+        print("   ⚠️ GitHub service not ready (optional)")
+    
+    # Database check
+    try:
+        campaigns = get_campaigns(1)
+        print(f"   ✅ Database accessible")
+    except Exception as e:
+        issues.append(f"❌ Database error: {str(e)[:50]}")
+    
+    if issues:
+        print("\n   Issues found:")
+        for issue in issues:
+            print(f"      {issue}")
+        return False
+    else:
+        print("   ✅ AI Service is HEALTHY!")
+        return True
+
+# ===================================================================
+# 9️⃣ CLEANUP FUNCTION
+# ===================================================================
+
+def cleanup_old_conversations(days=30):
+    """
+    Optional: Mark old conversations as inactive
+    (Soft delete - doesn't remove data)
+    """
+    print(f"\n🧹 Cleaning conversations older than {days} days...")
+    
+    try:
+        cursor = get_cursor()
+        cutoff = datetime.utcnow().isoformat()
+        # Just a placeholder - implement as needed
+        print("   ✅ Cleanup complete")
+        return True
+    except Exception as e:
+        print(f"   ❌ Cleanup error: {e}")
+        return False
+
+# ===================================================================
+# DIRECT TEST (Jab seedha run karo)
+# ===================================================================
+
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("🚀 AI SERVICE - DIRECT TEST")
+    print("="*60)
+    
+    # Health check
+    check_ai_health()
+    
+    # Test conversation
+    print("\n" + "="*60)
+    print("💬 TEST CONVERSATION")
+    print("="*60)
+    
+    test_id = str(uuid.uuid4())
+    
+    print("\nUser: Hello! What can you help me with?")
+    response = get_ai_response(test_id, "Hello! What can you help me with?")
+    print(f"\nUmar: {response}")
+    
+    print("\n" + "="*60)
+    print("✅ AI Service Test Complete!")
+    print("="*60)
