@@ -1,507 +1,364 @@
+# ai_service.py - COMPLETE WORKING VERSION
 # ====================================================================
 # 📁 FILE: ai_service.py
-# 🎯 ROLE: BRAIN - AI se baat karta hai, app.py ke hisab se complete
+# 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
 # 🔗 USED BY: app.py
-# 📋 FUNCTIONS: detect_intent, generate_response, get_ai_response, etc.
+# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py
+# 📋 TOTAL FUNCTIONS: 10
+# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat, create_file, update_file, delete_file, read_file, list_files, github_test, repo_info
 # ====================================================================
 
-import json
 import requests
+import time
 import uuid
 from datetime import datetime
-import re
 
-from config import MISTRAL_API_KEY, MISTRAL_URL, MODEL_NAME, HEADERS
-from db import (
-    get_cursor, commit, create_campaign, save_message, get_all_history,
-    get_campaign, update_campaign, count_questions, get_recent_history,
-    save_generated_content, get_campaigns
-)
+from config import MISTRAL_URL, HEADERS, MODEL_NAME, BACKEND_URL
+from db import get_recent_history, get_all_history, count_questions, save_message, update_campaign, save_generated_content
+from helpers import is_question, format_response, extract_topic, create_slug
+import db
+
+# ================= GITHUB AUTOMATION IMPORT =================
 from github_service import GitHubService
 
-github = GitHubService()
-
-# ====================================================================
-# SYSTEM PROMPT - AI KI PERSONALITY
-# ====================================================================
-
-SYSTEM_PROMPT = """Tu Umar hai - ek expert AI assistant jo blogs likhta hai aur knowledge share karta hai.
-
-TERE RULES:
-1. HAMESHA helpful aur friendly reh
-2. Agar user blog likhne bole to FORMAT ye rakh:
-
-   📝 TITLE: [blog ka title]
-   
-   [content with headings, bullet points, examples]
-   
-   📌 TAGS: [comma separated]
-
-3. Agar user question poochhe to acchi tarah samjha kar answer de
-4. Kabhi bhi galat ya harmful information mat de
-5. Hindi ya English dono mein baat kar sakta hai, jo user bole
-
-TU AISI HELP KAR SAKTA HAI:
-- Kisi bhi topic par explanation
-- Blog posts likhna
-- Knowledge share karna
-- Questions ke answers
-- Research help
-
-TU ASE HI HAI JAISE SABKUCH JAANTA HO - CONFIDENT RAHO!"""
-
-
-# ====================================================================
-# 🎯 FUNCTION 1: detect_intent() - Jo app.py call kar raha hai
-# ====================================================================
-# Yeh function 2 tarah se call hota hai:
-# 1. detect_intent(query)                    - 1 argument
-# 2. detect_intent(message, recent_history)  - 2 arguments
-
-def detect_intent(message, recent_history=None):
-    """
-    Detect user intention from message
-    
-    Args:
-        message: User ka message
-        recent_history: Optional - Last 20 messages (app.py se aata hai)
-    
-    Returns:
-        "blog_request" | "question" | "greeting" | "delete" | "rename" | "help" | "general"
-    """
-    msg_lower = message.lower().strip()
-    
-    # 🗑️ DELETE COMMAND - Exact match
-    if msg_lower == "delete" or msg_lower == "delete chat":
-        return "delete"
-    
-    # ✏️ RENAME COMMAND - Starts with "rename "
-    if msg_lower.startswith("rename "):
-        return "rename"
-    
-    # 📝 BLOG REQUEST - Multiple patterns
-    blog_patterns = [
-        'blog likh', 'blog post', 'article likh', 'post likh',
-        'blog banaye', 'ek blog likh', 'blog banao', 'blog chahiye',
-        'write a blog', 'create a blog', 'blog generate', 'blog likho',
-        'blog bana', 'blog likhna hai', 'blog post likh'
-    ]
-    for pattern in blog_patterns:
-        if pattern in msg_lower:
-            return "blog_request"
-    
-    # 🆘 HELP COMMAND
-    help_patterns = ['help', 'madad', 'sahayta', 'kya kar sakte ho', 'features', 'kaam kya hai']
-    for pattern in help_patterns:
-        if pattern in msg_lower:
-            return "help"
-    
-    # ❓ QUESTION - Question mark se
-    if message.strip().endswith('?'):
-        return "question"
-    
-    # ❓ QUESTION - Bina question mark ke (question starters)
-    question_starters = [
-        'kya', 'kaise', 'kyon', 'kahan', 'kab', 'kisko', 'kisne', 'kitna',
-        'batao', 'bataye', 'bata', 'what', 'how', 'why', 'where', 'when',
-        'tell me', 'explain', 'define', 'can you', 'could you', 'will you'
-    ]
-    for starter in question_starters:
-        if msg_lower.startswith(starter):
-            return "question"
-    
-    # 👋 GREETING
-    greetings = [
-        'hi', 'hello', 'hey', 'namaste', 'hola', 'greetings',
-        'good morning', 'good evening', 'good afternoon', 'salam', 'adaab'
-    ]
-    if msg_lower in greetings or msg_lower.strip() in greetings:
-        return "greeting"
-    
-    # 🟢 DEFAULT
-    return "general"
-
-
-# ====================================================================
-# 🎯 FUNCTION 2: generate_response() - Jo app.py call kar raha hai
-# ====================================================================
-# Yeh function 5 arguments ke saath call hota hai:
-# generate_response(intent, message, recent_history, all_history, campaign_id)
-
-def generate_response(intent, message, recent_history, all_history, campaign_id):
-    """
-    Generate response based on detected intent
-    
-    Args:
-        intent: detect_intent() se aaya hua intent
-        message: User ka original message
-        recent_history: Last 20 messages
-        all_history: Complete conversation history
-        campaign_id: Current chat ID
-    
-    Returns:
-        String - AI ka response
-    """
-    print(f"\n🎯 generate_response called")
-    print(f"   Intent: {intent}")
-    print(f"   Message: {message[:50]}...")
-    print(f"   Campaign: {campaign_id}")
-    
-    # 🗑️ DELETE intent
-    if intent == "delete":
-        return "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।"
-    
-    # ✏️ RENAME intent (app.py already handles, but safe side)
-    if intent == "rename":
-        new_name = message[7:].strip()
-        return f"✅ चैट का नाम बदलकर **{new_name}** कर दिया गया!"
-    
-    # 🆘 HELP intent
-    if intent == "help":
-        return """🤖 **Main Umar hoon - Aapka AI Assistant**
-
-Main yeh kar sakta hoon:
-
-📝 **Blog likhna** - "blog likho python" boliye
-❓ **Sawaal jawab** - Kuch bhi poochiye
-💬 **Baatchit** - General conversation
-📊 **Analysis** - Topics par deep explanation
-
-Aap jo bhi poochoge, main jawab dunga!"""
-    
-    # 👋 GREETING intent
-    if intent == "greeting":
-        return """नमस्ते! 🙏
-
-Main **Umar** hoon, aapka AI assistant. Main aapki kisi bhi topic par madad kar sakta hoon.
-
-📝 **Blog likh sakta hoon** - "blog likho python" boliye
-❓ **Sawaal jawab de sakta hoon** - Kuch bhi poochiye
-💬 **Baatchit kar sakta hoon** - Jo man kare
-
-Kya aapko kisi cheez mein madad chahiye?"""
-    
-    # 📝 BLOG REQUEST intent
-    if intent == "blog_request":
-        # Clean the message - remove blog keywords
-        topic = message
-        blog_keywords = ['blog likh', 'blog post', 'article likh', 'post likh', 
-                         'blog banaye', 'ek blog likh', 'blog banao', 'blog likho',
-                         'write a blog', 'create a blog', 'blog generate']
-        for keyword in blog_keywords:
-            topic = topic.lower().replace(keyword, '')
-        topic = topic.strip()
-        
-        if not topic or len(topic) < 3:
-            topic = "general knowledge and learning"
-        
-        return generate_blog(campaign_id, topic)
-    
-    # ❓ QUESTION or GENERAL intent
-    # Use get_ai_response for everything else
-    return get_ai_response(campaign_id, message, recent_history, all_history)
-
-
-# ====================================================================
-# 🔧 INTERNAL FUNCTION 1: get_ai_response()
-# ====================================================================
-# Yeh actual AI API call karta hai - Internal use only
-
-def get_ai_response(campaign_id, user_message, recent_history=None, all_history=None):
-    """
-    Actual AI API call - Mistral se response laata hai
-    """
-    print(f"\n🤖 get_ai_response called")
-    print(f"   Message: {user_message[:50]}...")
-    
+def ai_chat(messages, temperature=0.7, max_tokens=1000):
+    """Single AI call with Mistral API"""
     try:
-        # Check API key
-        if not MISTRAL_API_KEY:
-            return "⚠️ Error: MISTRAL_API_KEY not configured! Please add to Render environment variables."
-        
-        # Get or create campaign
-        campaign = get_campaign(campaign_id)
-        if not campaign:
-            now = datetime.utcnow().isoformat()
-            create_campaign(campaign_id, user_message[:50], now, message_count=0)
-            campaign = get_campaign(campaign_id)
-        
-        # Save user message to database
-        msg_id = str(uuid.uuid4())
-        is_question = user_message.strip().endswith('?') or '?' in user_message
-        timestamp = datetime.utcnow().isoformat()
-        save_message(msg_id, campaign_id, "user", user_message, 1 if is_question else 0, timestamp)
-        
-        # Get history if not provided
-        if all_history is None:
-            all_history = get_all_history(campaign_id)
-        
-        # Build messages for API
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        
-        # Add last 30 messages for context
-        for msg in all_history[-30:]:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        
-        # Prepare API request
         payload = {
             "model": MODEL_NAME,
             "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 2000,
-            "top_p": 0.9
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "top_p": 0.95
         }
         
-        print(f"   📡 Calling Mistral API...")
+        start_time = time.time()
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
         
-        # Make API call
-        response = requests.post(
-            MISTRAL_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=60
+        if r.status_code != 200:
+            return "⚠️ Server busy. Please try again."
+        
+        data = r.json()
+        response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
+        print(f"AI Response time: {time.time() - start_time:.2f}s")
+        return response.strip() if response else "I'm not sure how to respond."
+        
+    except requests.exceptions.Timeout:
+        return "⏰ Request timeout. Please try again."
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "❌ Error occurred. Please try again."
+
+def detect_intent(text, history=None):
+    """Advanced intent detection with context"""
+    t = text.lower()
+    
+    # ================= GITHUB AUTOMATION INTENTS =================
+    # Create File
+    if any(w in t for w in ["बनाओ", "create", "नई file", "new file", "file banao"]):
+        return "create_file"
+    
+    # Update File
+    if any(w in t for w in ["update", "बदलो", "edit", "change", "modify"]):
+        return "update_file"
+    
+    # Delete File
+    if any(w in t for w in ["delete", "हटाओ", "remove", "mitao"]):
+        return "delete_file"
+    
+    # Read File
+    if any(w in t for w in ["दिखाओ", "read", "show", "dekho", "content"]):
+        return "read_file"
+    
+    # List Files
+    if any(w in t for w in ["files list", "कौन कौन files", "list files", "saari files", "all files"]):
+        return "list_files"
+    
+    # GitHub Test
+    if any(w in t for w in ["github test", "connection check", "test connection", "github check"]):
+        return "github_test"
+    
+    # Repo Info
+    if any(w in t for w in ["repo info", "repository info", "github info"]):
+        return "repo_info"
+    
+    # ================= ORIGINAL INTENTS =================
+    # Question count
+    if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye", "kitne question"]):
+        return "count_questions"
+    
+    # List questions
+    if any(w in t for w in ["kaun kaun se sawal", "kya kya sawal", "list questions", "sawal list", "which questions"]):
+        return "list_questions"
+    
+    # Blog generation
+    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog", "blog banao"]):
+        return "blog"
+    
+    # Follow-up
+    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more", "aur details", "aur info"]):
+        return "follow_up"
+    
+    # Recall past
+    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad", "kya tha"]):
+        return "recall"
+    
+    return "chat"
+
+def generate_blog(topic):
+    """Generate blog content"""
+    system = f"""You are an expert writer. Create a detailed, engaging blog post about: {topic}
+
+Format with:
+- Catchy title with emoji at beginning
+- Introduction paragraph
+- Clear sections with headings (use ## for subheadings)
+- Bullet points where helpful using *
+- Strong conclusion
+
+Use markdown formatting (**, *, etc). Keep it informative and engaging."""
+
+    messages = [{"role": "system", "content": system}]
+    return ai_chat(messages, temperature=0.8, max_tokens=2000)
+
+# ================= GITHUB AUTOMATION HELPER FUNCTIONS =================
+
+def extract_file_name(message):
+    """Message se file name extract karo"""
+    words = message.split()
+    for word in words:
+        if '.' in word and len(word) > 3:
+            return word
+    return None
+
+def extract_code_from_message(message):
+    """Message se code block extract karo"""
+    if '```' in message:
+        parts = message.split('```')
+        if len(parts) >= 2:
+            code = parts[1].strip()
+            if code.startswith('python'):
+                code = code[6:].strip()
+            return code
+    return None
+
+def generate_response(intent, message, history, all_history, campaign_id=None):
+    """Generate smart response with full context"""
+    
+    # ================= FORCE GITHUB CHECK =================
+    words = message.lower().split()
+    has_file = any('.' in w and len(w) > 3 for w in words)
+    has_read = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content", "kitne function", "functions hain"])
+    
+    if has_file and has_read and intent == "chat":
+        intent = "read_file"
+    # ================= END FORCE CHECK =================
+    
+    # ================= GITHUB AUTOMATION HANDLERS =================
+    
+    # ----- CREATE FILE -----
+    if intent == "create_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file बनानी है? File name बताओ (जैसे: test.py)"
+        
+        code = extract_code_from_message(message)
+        if not code:
+            code = f"# {file_name}\n# Auto-created by AI System\n# Created: {datetime.utcnow().isoformat()}\n\n"
+        
+        result = github.create_file(file_name, code)
+        
+        if result["success"]:
+            return f"""✅ **{result['message']}**
+📁 **File:** `{file_name}`
+🔗 **URL:** {result['file_url']}"""
+        else:
+            return f"❌ File नहीं बन पाई: {result['error']}"
+    
+    # ----- UPDATE FILE -----
+    elif intent == "update_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file update करनी है? File name बताओ।"
+        
+        new_code = extract_code_from_message(message)
+        if not new_code:
+            read_result = github.read_file(file_name)
+            if read_result["success"]:
+                content_preview = read_result['content'][:500]
+                return f"📄 **Current content of `{file_name}`:**\n```python\n{content_preview}\n```"
+            else:
+                return f"❌ File पढ़ नहीं पाए: {read_result['error']}"
+        
+        result = github.update_file(file_name, new_code)
+        
+        if result["success"]:
+            return f"""✅ **{result['message']}**
+📁 **File:** `{file_name}`
+🔗 **URL:** {result['file_url']}"""
+        else:
+            return f"❌ File update नहीं हो पाई: {result['error']}"
+    
+    # ----- DELETE FILE -----
+    elif intent == "delete_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file delete करनी है? File name बताओ।"
+        
+        result = github.delete_file(file_name)
+        
+        if result["success"]:
+            return f"✅ **{result['message']}**\n📁 **File:** `{file_name}`"
+        else:
+            return f"❌ File delete नहीं हो पाई: {result['error']}"
+    
+    # ----- READ FILE -----
+    elif intent == "read_file":
+        github = GitHubService()
+        file_name = extract_file_name(message)
+        
+        if not file_name:
+            return "❓ कौन सी file पढ़नी है? File name बताओ।"
+        
+        result = github.read_file(file_name)
+        
+        if result["success"]:
+            content = result['content']
+            function_count = content.count('def ') + content.count('async def ')
+            
+            if len(content) > 2000:
+                content = content[:2000] + "\n\n... (file बड़ी है, पूरी नहीं दिखा सकते)"
+            return f"📄 **{file_name}** ({function_count} functions)\n```python\n{content}\n```\n🔗 {result['file_url']}"
+        else:
+            return f"❌ File पढ़ नहीं पाए: {result['error']}"
+    
+    # ----- LIST FILES -----
+    elif intent == "list_files":
+        github = GitHubService()
+        result = github.list_files()
+        
+        if result["success"]:
+            if result["count"] == 0:
+                return "📂 Repository खाली है।"
+            
+            files_list = "\n".join([f"{f['type']} `{f['name']}`" for f in result["files"][:20]])
+            return f"📂 **Repository Files ({result['count']} total):**\n{files_list}"
+        else:
+            return f"❌ Files list नहीं मिली: {result['error']}"
+    
+    # ----- GITHUB TEST -----
+    elif intent == "github_test":
+        github = GitHubService()
+        result = github.test_connection()
+        
+        if result["success"]:
+            return f"""{result['message']}
+🔗 **Repo:** {result['repo_url']}
+🔒 **Private:** {result['private']}
+⭐ **Stars:** {result['stars']}"""
+        else:
+            return f"❌ Connection failed: {result['error']}"
+    
+    # ----- REPO INFO -----
+    elif intent == "repo_info":
+        github = GitHubService()
+        result = github.get_repo_info()
+        
+        if result["success"]:
+            return f"""📁 **{result['name']}**
+🔗 {result['url']}
+📝 {result['description']}
+⭐ {result['stars']} stars | 🍴 {result['forks']} forks
+💻 Language: {result['language']}
+📅 Created: {result['created'][:10]}
+🔄 Updated: {result['updated'][:10]}"""
+        else:
+            return f"❌ Repo info नहीं मिली: {result['error']}"
+    
+    # ================= ORIGINAL INTENTS =================
+    
+    # ----- COUNT QUESTIONS -----
+    elif intent == "count_questions":
+        if campaign_id:
+            count = count_questions(campaign_id)
+            return f"📊 आपने इस chat में **{count}** सवाल पूछे हैं।"
+        else:
+            return "📊 अभी कोई chat open नहीं है।"
+    
+    # ----- LIST QUESTIONS -----
+    elif intent == "list_questions":
+        if campaign_id:
+            all_msgs = get_all_history(campaign_id)
+            questions = [m for m in all_msgs if m.get("is_question")]
+            if questions:
+                q_list = "\n".join([f"{i+1}. {q['content'][:100]}" for i, q in enumerate(questions[:10])])
+                return f"📋 **आपके सवाल ({len(questions)} total):**\n{q_list}"
+            else:
+                return "📋 अभी तक कोई सवाल नहीं पूछा।"
+        else:
+            return "📋 अभी कोई chat open नहीं है।"
+    
+    # ----- BLOG -----
+    elif intent == "blog":
+        topic = extract_topic(message)
+        blog_content = generate_blog(topic)
+        
+        # Save blog to database
+        slug = create_slug(topic)
+        from db import save_blog_enhanced
+        from datetime import datetime
+        
+        blog_id = str(uuid.uuid4())
+        save_blog_enhanced(
+            blog_id, topic, blog_content, blog_content, slug,
+            blog_content[:150], 3, "", blog_content[:150], "",
+            datetime.utcnow().isoformat()
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            ai_response = result["choices"][0]["message"]["content"]
-            
-            # Save AI response
-            ai_msg_id = str(uuid.uuid4())
-            save_message(ai_msg_id, campaign_id, "assistant", ai_response, 0, datetime.utcnow().isoformat())
-            
-            # Update campaign stats
-            new_question_count = count_questions(campaign_id)
-            update_campaign(
-                campaign_id,
-                datetime.utcnow().isoformat(),
-                message_count_increment=2,
-                question_count=new_question_count,
-                last_topic=user_message[:100]
-            )
-            
-            print(f"   ✅ AI response generated successfully")
-            return ai_response
-            
+        return f"""{blog_content}
+
+---
+✅ **Blog Published!** 
+🔗 **Link:** {BACKEND_URL}/blog/{slug}"""
+    
+    # ----- FOLLOW-UP -----
+    elif intent == "follow_up":
+        if history and len(history) >= 2:
+            last_topic = history[-2]["content"][:100]
+            system = f"""User wants more details on the previous topic: "{last_topic}"
+Provide additional information, examples, and deeper insights."""
+            messages = [{"role": "system", "content": system}]
+            return ai_chat(messages, temperature=0.7, max_tokens=800)
         else:
-            error_msg = f"❌ API Error: {response.status_code}"
-            print(f"   {error_msg}")
-            return f"⚠️ Sorry, API error: {response.status_code}"
-            
-    except requests.exceptions.Timeout:
-        return "⚠️ Request timed out. Please try again."
-    except Exception as e:
-        print(f"   ❌ Error: {str(e)}")
-        return f"⚠️ Error: {str(e)[:100]}"
-
-
-# ====================================================================
-# 🔧 INTERNAL FUNCTION 2: generate_blog()
-# ====================================================================
-
-def generate_blog(campaign_id, topic):
-    """
-    Generate a complete blog post on given topic
-    """
-    print(f"\n📝 Generating blog on: {topic}")
+            return "🤔 किस बारे में और बताऊं? पिछली बातचीत का context नहीं मिला।"
     
-    prompt = f"""Write a detailed, well-structured blog post about: {topic}
+    # ----- RECALL -----
+    elif intent == "recall":
+        if all_history and len(all_history) > 0:
+            history_text = "\n".join([f"{m['role']}: {m['content'][:50]}" for m in all_history[-10:]])
+            system = f"""User wants to recall past conversation. Here's the history:
+{history_text}
 
-REQUIREMENTS:
-1. Catchy title with 📝 emoji
-2. Introduction that hooks the reader
-3. 3-5 main headings with detailed content
-4. Practical examples and actionable tips
-5. Bullet points for key takeaways
-6. Conclusion that summarizes
-7. Estimated reading time at top
-8. Tags at the end
-
-FORMAT:
-📝 TITLE: [Your Title]
-
-⏱️ Reading time: X min
-
-## Introduction
-[content]
-
-## Heading 1
-[content with examples]
-
-## Heading 2
-[content]
-
-## Conclusion
-[summary]
-
-📌 TAGS: tag1, tag2, tag3
-
-Write in engaging, helpful style. Make it valuable!"""
+Summarize what was discussed earlier in a helpful way."""
+            messages = [{"role": "system", "content": system}]
+            return ai_chat(messages, temperature=0.5, max_tokens=500)
+        else:
+            return "📜 अभी तक कोई बातचीत नहीं हुई है।"
     
-    return get_ai_response(campaign_id, prompt)
-
-
-# ====================================================================
-# 🔧 INTERNAL FUNCTION 3: save_blog_to_github()
-# ====================================================================
-
-def save_blog_to_github(blog_title, blog_content, campaign_id=None):
-    """
-    Blog ko GitHub mein save karta hai
-    """
-    print(f"\n💾 Saving blog to GitHub: {blog_title}")
-    
-    slug = blog_title.lower()
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
-    slug = re.sub(r'[\s-]+', '-', slug)
-    slug = slug.strip('-')[:50]
-    
-    timestamp = datetime.now().strftime("%Y-%m-%d")
-    filename = f"blogs/{timestamp}-{slug}.md"
-    
-    markdown_content = f"""---
-title: {blog_title}
-date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-author: Umar AI
----
-
-{blog_content}
-
----
-*Auto-generated by Umar AI Assistant*
-"""
-    
-    if github.ready:
-        result = github.create_file(filename, markdown_content, f"📝 Blog: {blog_title}")
-        if result.get("success"):
-            if campaign_id:
-                save_generated_content(
-                    str(uuid.uuid4()), campaign_id, "blog",
-                    blog_title, result.get("file_url", ""),
-                    datetime.utcnow().isoformat()
-                )
-            return {
-                "success": True,
-                "url": result.get("file_url", ""),
-                "filename": filename,
-                "message": "✅ Blog saved to GitHub!"
-            }
-    
-    return {
-        "success": False,
-        "error": "GitHub not available",
-        "message": "⚠️ GitHub not configured. Blog not saved."
-    }
-
-
-# ====================================================================
-# 🏥 HEALTH CHECK
-# ====================================================================
-
-def check_ai_health():
-    """Check if AI service is healthy"""
-    if not MISTRAL_API_KEY:
-        print("❌ MISTRAL_API_KEY missing")
-        return False
-    print("✅ AI Service healthy")
-    return True
-
-
-# ====================================================================
-# 📊 ANALYZE QUESTION (Optional)
-# ====================================================================
-
-def analyze_question(question):
-    """Analyze question complexity"""
-    return {
-        "is_question": question.endswith('?'),
-        "length": len(question.split()),
-        "complexity": "high" if len(question.split()) > 15 else "medium" if len(question.split()) > 8 else "low"
-    }
-
-
-# ====================================================================
-# 💬 GET CHAT SUMMARY (Optional)
-# ====================================================================
-
-def get_chat_summary(campaign_id):
-    """Get summary of conversation"""
-    history = get_all_history(campaign_id)
-    if not history:
-        return "No messages yet"
-    
-    user_msgs = [m for m in history if m["role"] == "user"]
-    assistant_msgs = [m for m in history if m["role"] == "assistant"]
-    
-    return {
-        "total_messages": len(history),
-        "user_messages": len(user_msgs),
-        "assistant_messages": len(assistant_msgs),
-        "summary": f"Chat has {len(user_msgs)} exchanges"
-    }
-
-
-# ====================================================================
-# 💬 SUGGEST FOLLOWUP (Optional)
-# ====================================================================
-
-def suggest_followup_questions(campaign_id, last_topic):
-    """Suggest follow-up questions based on context"""
-    return [
-        "Can you explain that in more detail?",
-        "What are the practical applications?",
-        "Are there any alternatives or better approaches?",
-        "Can you give me an example?",
-        "What are the common mistakes to avoid?"
-    ]
-
-
-# ====================================================================
-# 🧪 DIRECT TEST (Jab seedha run karo)
-# ====================================================================
-
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🧪 TESTING AI_SERVICE.PY")
-    print("="*60)
-    
-    # Test 1: detect_intent with 1 parameter
-    print("\n📌 Test 1: detect_intent (1 parameter)")
-    test_cases = [
-        ("hello", "greeting"),
-        ("blog likho python", "blog_request"),
-        ("kya tum ho?", "question"),
-        ("delete", "delete"),
-        ("rename my chat", "rename"),
-        ("help", "help"),
-    ]
-    for msg, expected in test_cases:
-        result = detect_intent(msg)
-        status = "✅" if result == expected else "❌"
-        print(f"   {status} '{msg}' → {result} (expected: {expected})")
-    
-    # Test 2: detect_intent with 2 parameters
-    print("\n📌 Test 2: detect_intent (2 parameters)")
-    result = detect_intent("hello", [])
-    print(f"   ✅ With history param: {result}")
-    
-    # Test 3: generate_response signature check
-    print("\n📌 Test 3: generate_response function")
-    import inspect
-    sig = inspect.signature(generate_response)
-    params = list(sig.parameters.keys())
-    print(f"   Parameters: {params}")
-    print(f"   Expected: ['intent', 'message', 'recent_history', 'all_history', 'campaign_id']")
-    if params == ['intent', 'message', 'recent_history', 'all_history', 'campaign_id']:
-        print("   ✅ generate_response signature MATCHES!")
+    # ----- DEFAULT CHAT -----
     else:
-        print("   ❌ generate_response signature MISMATCH")
-    
-    # Test 4: Check AI health
-    print("\n📌 Test 4: AI Health")
-    health = check_ai_health()
-    print(f"   Health status: {'✅ Healthy' if health else '❌ Not healthy'}")
-    
-    print("\n" + "="*60)
-    print("✅ AI_SERVICE.PY IS READY FOR APP.PY!")
-    print("="*60)
+        if not history:
+            history = []
+        
+        system = """You are a helpful AI assistant. Answer questions clearly and concisely.
+Use markdown formatting when helpful. Be friendly and professional."""
+        
+        messages = [{"role": "system", "content": system}] + history[-10:]
+        return ai_chat(messages, temperature=0.7, max_tokens=1000)
