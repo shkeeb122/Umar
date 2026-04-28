@@ -1,11 +1,10 @@
-# db.py - COMPLETE WORKING VERSION WITH MAP (FIXED)
+# db.py - COMPLETE WORKING VERSION WITH MAP
 # ====================================================================
 # 📁 FILE: db.py
 # 🎯 ROLE: MEMORY - Saara data store karta hai
 # 🔗 USED BY: app.py, ai_service.py, blog_service.py
 # 📊 TOTAL TABLES: 6
 # 📋 TOTAL COLUMNS: 42
-# 🔧 FIX: Database ab code folder mein save hoti hai - deploy ke baad safe
 # ====================================================================
 
 import sqlite3
@@ -15,14 +14,6 @@ import os
 
 conn = None
 cursor = None
-
-# ====================================================================
-# 🔧 FIX: DATABASE PATH (Code folder - Render Free Tier safe)
-# ====================================================================
-# Pehle: "ai_system.db" (temporary - deploy par delete ho jata tha)
-# Ab: Code folder mein "ai_system.db" (deploy ke baad bhi safe)
-# ====================================================================
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_system.db")
 
 # ====================================================================
 # 📊 DATABASE MAP - Complete documentation
@@ -168,11 +159,9 @@ def init_db():
     print("🚀 SMART DATABASE INITIALIZATION")
     print("=" * 70)
     print(f"📌 Target Version: {DB_VERSION}")
-    print(f"📁 Database Path: {DB_FILE}")
     print("=" * 70)
     
-    # 🔧 FIX: Code folder path use karo (pehle "ai_system.db" tha)
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect("ai_system.db", check_same_thread=False)
     cursor = conn.cursor()
     
     # SECTION 1: CREATE BASE TABLES
@@ -220,7 +209,6 @@ def init_db():
     
     conn.commit()
     print("\n✅ DATABASE INITIALIZATION COMPLETE! (Old data SAFE, New features ADDED)")
-    print(f"📁 Database permanently stored at: {DB_FILE}")
 
 # ====================================================================
 # DATABASE INFO FUNCTIONS
