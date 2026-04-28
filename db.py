@@ -171,7 +171,7 @@ def init_db():
     print(f"📁 Database Path: {DB_FILE}")
     print("=" * 70)
     
-    # 🔧 FIX: Code folder path use karo
+    # 🔧 FIX: Code folder path use karo (pehle "ai_system.db" tha)
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
     
