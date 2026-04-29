@@ -1,68 +1,62 @@
 # ====================================================================
 # 📁 FILE: github_service.py
-# 🎯 ROLE: GitHub API Operations - Create, Read, Update, Delete Files
+# 🎯 ROLE: GitHub API Operations - ENHANCED with confirmation & batch ops
 # 🔗 USED BY: ai_service.py (Brain)
 # 🔑 TOKEN: Render Environment Variables se leta hai
-# 📋 TOTAL FUNCTIONS: 7
+# 📋 TOTAL FUNCTIONS: 12 (7 old + 5 new)
+# 🆕 NEW: Delete confirmation, Batch operations, Rate limit handling
 # ====================================================================
 
 import os
 import requests
 import base64
+import time
 from datetime import datetime
 
-# config.py se settings import karo
 from config import GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH
 
 
 class GitHubService:
     """
-    GitHub Service Class
+    GitHub Service Class - ENHANCED VERSION
     GitHub Repo ke saath saare operations handle karta hai
     """
     
     def __init__(self):
         """Initialize GitHub Service"""
-        # Token Render Environment Variables se lo
         self.token = os.environ.get("GITHUB_TOKEN")
         self.owner = GITHUB_OWNER
         self.repo = GITHUB_REPO
         self.branch = GITHUB_BRANCH
+        self.pending_delete = None  # For confirmation
         
-        # Check if token exists
         if not self.token:
-            print("⚠️ WARNING: GITHUB_TOKEN not found in Environment Variables!")
+            print("⚠️ WARNING: GITHUB_TOKEN not found!")
             self.ready = False
         else:
             print("✅ GitHub Service Ready")
             self.ready = True
         
-        # GitHub API Headers
         self.headers = {
             "Authorization": f"token {self.token}",
             "Accept": "application/vnd.github.v3+json"
         }
-        
-        # GitHub API Base URL
         self.api_url = "https://api.github.com"
+        self.rate_limit_remaining = 5000
+        self.rate_limit_reset = 0
     
-    # ====================================================================
-    # 1️⃣ TEST CONNECTION
-    # ====================================================================
+    # ================= EXISTING METHODS (SAME) =================
     
     def test_connection(self):
         """Check if GitHub connection is working"""
-        
         if not self.ready:
-            return {
-                "success": False,
-                "error": "GitHub Token not configured in Render Environment"
-            }
+            return {"success": False, "error": "GitHub Token not configured"}
         
         url = f"{self.api_url}/repos/{self.owner}/{self.repo}"
         
         try:
             response = requests.get(url, headers=self.headers)
+            self._update_rate_limit(response.headers)
             
             if response.status_code == 200:
                 data = response.json()
@@ -74,43 +68,21 @@ class GitHubService:
                     "stars": data['stargazers_count']
                 }
             elif response.status_code == 401:
-                return {
-                    "success": False,
-                    "error": "❌ Invalid Token! Please check GITHUB_TOKEN"
-                }
+                return {"success": False, "error": "❌ Invalid Token!"}
             elif response.status_code == 404:
-                return {
-                    "success": False,
-                    "error": f"❌ Repository '{self.owner}/{self.repo}' not found"
-                }
+                return {"success": False, "error": f"❌ Repository not found"}
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ HTTP Error: {response.status_code}"
-                }
-                
+                return {"success": False, "error": f"❌ HTTP Error: {response.status_code}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Connection error: {str(e)}"
-            }
-    
-    # ====================================================================
-    # 2️⃣ CREATE FILE
-    # ====================================================================
+            return {"success": False, "error": f"❌ Connection error: {str(e)}"}
     
     def create_file(self, file_name, content, commit_message=None):
-        """
-        Create a new file in GitHub Repo
-        
-        Parameters:
-        - file_name: Name of the file (e.g., 'payment.py')
-        - content: File content as string
-        - commit_message: Optional commit message
-        """
-        
+        """Create a new file in GitHub Repo"""
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
+        
+        if self._check_rate_limit():
+            return {"success": False, "error": "Rate limit exceeded. Please try later."}
         
         if not commit_message:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -118,26 +90,16 @@ class GitHubService:
         
         url = f"{self.api_url}/repos/{self.owner}/{self.repo}/contents/{file_name}"
         
-        # Check if file already exists
         check = requests.get(url, headers=self.headers)
         if check.status_code == 200:
-            return {
-                "success": False,
-                "error": f"⚠️ File '{file_name}' already exists! Use update_file() to modify."
-            }
+            return {"success": False, "error": f"⚠️ File '{file_name}' already exists!"}
         
-        # Encode content to base64
         encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-        
-        # Prepare data
-        data = {
-            "message": commit_message,
-            "content": encoded_content,
-            "branch": self.branch
-        }
+        data = {"message": commit_message, "content": encoded_content, "branch": self.branch}
         
         try:
             response = requests.put(url, headers=self.headers, json=data)
+            self._update_rate_limit(response.headers)
             
             if response.status_code in [200, 201]:
                 result = response.json()
@@ -145,33 +107,15 @@ class GitHubService:
                     "success": True,
                     "message": f"✅ File created: {file_name}",
                     "file_url": result["content"]["html_url"],
-                    "commit_url": result["commit"]["html_url"],
                     "file_name": file_name
                 }
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ Failed: {response.json()}"
-                }
-                
+                return {"success": False, "error": f"❌ Failed: {response.json()}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Error: {str(e)}"
-            }
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
     
-    # ====================================================================
-    # 3️⃣ READ FILE
-    # ====================================================================
-    
-    def read_file(self, file_name):
-        """
-        Read file content from GitHub Repo
-        
-        Parameters:
-        - file_name: Name of the file to read
-        """
-        
+    def read_file(self, file_name, max_lines=None):
+        """Read file content - with optional line limit"""
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
         
@@ -179,10 +123,18 @@ class GitHubService:
         
         try:
             response = requests.get(url, headers=self.headers)
+            self._update_rate_limit(response.headers)
             
             if response.status_code == 200:
                 data = response.json()
                 content = base64.b64decode(data["content"]).decode("utf-8")
+                
+                # Limit lines if requested
+                if max_lines:
+                    lines = content.split('\n')
+                    if len(lines) > max_lines:
+                        content = '\n'.join(lines[:max_lines]) + f"\n\n... (file has {len(lines)} lines, showing first {max_lines})"
+                
                 return {
                     "success": True,
                     "content": content,
@@ -192,40 +144,17 @@ class GitHubService:
                     "size_bytes": data["size"]
                 }
             elif response.status_code == 404:
-                return {
-                    "success": False,
-                    "error": f"❌ File '{file_name}' not found"
-                }
+                return {"success": False, "error": f"❌ File '{file_name}' not found"}
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ HTTP Error: {response.status_code}"
-                }
-                
+                return {"success": False, "error": f"❌ HTTP Error: {response.status_code}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Error: {str(e)}"
-            }
-    
-    # ====================================================================
-    # 4️⃣ UPDATE FILE
-    # ====================================================================
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
     
     def update_file(self, file_name, new_content, commit_message=None):
-        """
-        Update an existing file in GitHub Repo
-        
-        Parameters:
-        - file_name: Name of the file to update
-        - new_content: New content for the file
-        - commit_message: Optional commit message
-        """
-        
+        """Update an existing file"""
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
         
-        # First read the file to get SHA
         read_result = self.read_file(file_name)
         if not read_result["success"]:
             return read_result
@@ -235,11 +164,8 @@ class GitHubService:
             commit_message = f"✏️ Auto-updated {file_name} at {timestamp}"
         
         url = f"{self.api_url}/repos/{self.owner}/{self.repo}/contents/{file_name}"
-        
-        # Encode new content
         encoded_content = base64.b64encode(new_content.encode("utf-8")).decode("utf-8")
         
-        # Prepare data
         data = {
             "message": commit_message,
             "content": encoded_content,
@@ -249,6 +175,7 @@ class GitHubService:
         
         try:
             response = requests.put(url, headers=self.headers, json=data)
+            self._update_rate_limit(response.headers)
             
             if response.status_code in [200, 201]:
                 result = response.json()
@@ -256,88 +183,55 @@ class GitHubService:
                     "success": True,
                     "message": f"✅ File updated: {file_name}",
                     "file_url": result["content"]["html_url"],
-                    "commit_url": result["commit"]["html_url"],
                     "file_name": file_name
                 }
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ Failed: {response.json()}"
-                }
-                
+                return {"success": False, "error": f"❌ Failed: {response.json()}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Error: {str(e)}"
-            }
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
     
-    # ====================================================================
-    # 5️⃣ DELETE FILE
-    # ====================================================================
-    
-    def delete_file(self, file_name, commit_message=None):
+    # ================= 🆕 ENHANCED DELETE WITH CONFIRMATION =================
+    def delete_file(self, file_name, confirm=False, commit_message=None):
         """
-        Delete a file from GitHub Repo
-        
-        Parameters:
-        - file_name: Name of the file to delete
-        - commit_message: Optional commit message
+        Delete a file - REQUIRES CONFIRMATION
+        Set confirm=True to actually delete
         """
-        
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
         
-        # First read the file to get SHA
+        # Check if we need confirmation
+        if not confirm:
+            return {
+                "success": False, 
+                "need_confirm": True,
+                "message": f"⚠️ Kya aap '{file_name}' delete karna chahte ho?",
+                "file_name": file_name
+            }
+        
         read_result = self.read_file(file_name)
         if not read_result["success"]:
             return read_result
         
         if not commit_message:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            commit_message = f"🗑️ Auto-deleted {file_name} at {timestamp}"
+            commit_message = f"🗑️ Deleted {file_name} at {timestamp}"
         
         url = f"{self.api_url}/repos/{self.owner}/{self.repo}/contents/{file_name}"
-        
-        # Prepare data
-        data = {
-            "message": commit_message,
-            "sha": read_result["sha"],
-            "branch": self.branch
-        }
+        data = {"message": commit_message, "sha": read_result["sha"], "branch": self.branch}
         
         try:
             response = requests.delete(url, headers=self.headers, json=data)
+            self._update_rate_limit(response.headers)
             
             if response.status_code == 200:
-                return {
-                    "success": True,
-                    "message": f"✅ File deleted: {file_name}",
-                    "file_name": file_name
-                }
+                return {"success": True, "message": f"✅ File deleted: {file_name}", "file_name": file_name}
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ Failed: {response.json()}"
-                }
-                
+                return {"success": False, "error": f"❌ Failed: {response.json()}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Error: {str(e)}"
-            }
-    
-    # ====================================================================
-    # 6️⃣ LIST FILES
-    # ====================================================================
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
     
     def list_files(self, folder_path=""):
-        """
-        List all files in a folder
-        
-        Parameters:
-        - folder_path: Folder path (empty for root)
-        """
-        
+        """List all files in a folder"""
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
         
@@ -345,6 +239,7 @@ class GitHubService:
         
         try:
             response = requests.get(url, headers=self.headers)
+            self._update_rate_limit(response.headers)
             
             if response.status_code == 200:
                 files = []
@@ -355,63 +250,25 @@ class GitHubService:
                         "url": item["html_url"],
                         "size": item.get("size", 0)
                     })
-                return {
-                    "success": True,
-                    "files": files,
-                    "count": len(files),
-                    "folder": folder_path or "root"
-                }
+                return {"success": True, "files": files, "count": len(files), "folder": folder_path or "root"}
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ HTTP Error: {response.status_code}"
-                }
-                
+                return {"success": False, "error": f"❌ HTTP Error: {response.status_code}"}
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"❌ Error: {str(e)}"
-            }
-    
-    # ====================================================================
-    # 7️⃣ CREATE TEST FILE
-    # ====================================================================
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
     
     def create_test_file(self):
-        """Create a test file to verify everything works"""
-        
+        """Create a test file"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
         content = f"""# GitHub Connection Test
-========================
 Created: {timestamp}
 Owner: {self.owner}
 Repo: {self.repo}
-Branch: {self.branch}
-
 ✅ Connection Successful!
-
-This file confirms that:
-1. GitHub Token is valid
-2. Repository access is working
-3. File creation is successful
-
-Your GitHub Automation is ready!
 """
-        
-        return self.create_file(
-            "test_connection.txt",
-            content,
-            f"🤖 Test connection at {timestamp}"
-        )
-    
-    # ====================================================================
-    # 8️⃣ GET REPO INFO
-    # ====================================================================
+        return self.create_file("test_connection.txt", content, f"🤖 Test at {timestamp}")
     
     def get_repo_info(self):
         """Get repository information"""
-        
         if not self.ready:
             return {"success": False, "error": "GitHub Token not configured"}
         
@@ -419,6 +276,7 @@ Your GitHub Automation is ready!
         
         try:
             response = requests.get(url, headers=self.headers)
+            self._update_rate_limit(response.headers)
             
             if response.status_code == 200:
                 data = response.json()
@@ -435,73 +293,86 @@ Your GitHub Automation is ready!
                     "updated": data["updated_at"]
                 }
             else:
-                return {
-                    "success": False,
-                    "error": f"❌ HTTP Error: {response.status_code}"
-                }
-                
+                return {"success": False, "error": f"❌ HTTP Error: {response.status_code}"}
         except Exception as e:
+            return {"success": False, "error": f"❌ Error: {str(e)}"}
+    
+    # ================= 🆕 NEW METHOD 1: BATCH CREATE FILES =================
+    def batch_create_files(self, files_list):
+        """
+        Create multiple files at once
+        files_list = [{"name": "file1.py", "content": "code"}, ...]
+        """
+        results = []
+        for file_info in files_list:
+            result = self.create_file(file_info["name"], file_info["content"])
+            results.append(result)
+            time.sleep(0.5)  # Avoid rate limit
+        return results
+    
+    # ================= 🆕 NEW METHOD 2: RATE LIMIT HANDLING =================
+    def _update_rate_limit(self, headers):
+        """Update rate limit info from response headers"""
+        if 'X-RateLimit-Remaining' in headers:
+            self.rate_limit_remaining = int(headers['X-RateLimit-Remaining'])
+        if 'X-RateLimit-Reset' in headers:
+            self.rate_limit_reset = int(headers['X-RateLimit-Reset'])
+    
+    def _check_rate_limit(self):
+        """Check if rate limit is exceeded"""
+        if self.rate_limit_remaining <= 10:
+            wait_time = self.rate_limit_reset - time.time()
+            if wait_time > 0:
+                return True
+        return False
+    
+    def get_rate_limit_status(self):
+        """Get current rate limit status"""
+        return {
+            "remaining": self.rate_limit_remaining,
+            "reset_time": datetime.fromtimestamp(self.rate_limit_reset).isoformat() if self.rate_limit_reset else None,
+            "ready": self.rate_limit_remaining > 10
+        }
+    
+    # ================= 🆕 NEW METHOD 3: GET FILE METRICS =================
+    def get_file_metrics(self, file_name):
+        """Get metrics about a file without reading full content"""
+        result = self.read_file(file_name, max_lines=10)
+        if not result["success"]:
+            return result
+        
+        content = result.get("content", "")
+        return {
+            "success": True,
+            "file_name": file_name,
+            "size_bytes": result.get("size_bytes", 0),
+            "line_count": len(content.split('\n')) if content else 0,
+            "function_count": content.count('def ') + content.count('async def '),
+            "class_count": content.count('class '),
+            "import_count": content.count('import ') + content.count('from '),
+            "url": result.get("file_url")
+        }
+    
+    # ================= 🆕 NEW METHOD 4: BATCH DELETE =================
+    def batch_delete_files(self, file_names, confirm=False):
+        """Delete multiple files at once"""
+        if not confirm:
             return {
                 "success": False,
-                "error": f"❌ Error: {str(e)}"
+                "need_confirm": True,
+                "message": f"⚠️ Kya aap ye {len(file_names)} files delete karna chahte ho?",
+                "files": file_names
             }
-
-
-# ====================================================================
-# DIRECT TEST (जब सीधे run करो)
-# ====================================================================
-
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🚀 GITHUB SERVICE - DIRECT TEST")
-    print("="*60)
-    
-    # Initialize service
-    github = GitHubService()
-    
-    if not github.ready:
-        print("\n❌ Cannot proceed!")
-        print("   Please add GITHUB_TOKEN to Render Environment Variables")
-        print("\n   Steps:")
-        print("   1. Go to Render Dashboard")
-        print("   2. Select umar-k20u service")
-        print("   3. Environment tab")
-        print("   4. Add GITHUB_TOKEN variable")
-    else:
-        # Test 1: Connection
-        print("\n1️⃣ Testing connection...")
-        conn = github.test_connection()
-        if conn["success"]:
-            print(f"   {conn['message']}")
-            print(f"   🔗 {conn['repo_url']}")
-        else:
-            print(f"   {conn['error']}")
         
-        # Test 2: Repo Info
-        print("\n2️⃣ Getting repo info...")
-        info = github.get_repo_info()
-        if info["success"]:
-            print(f"   📁 {info['name']}")
-            print(f"   ⭐ {info['stars']} stars")
-            print(f"   📝 {info['language']}")
-        
-        # Test 3: Create test file
-        print("\n3️⃣ Creating test file...")
-        result = github.create_test_file()
-        if result["success"]:
-            print(f"   {result['message']}")
-            print(f"   📁 {result['file_url']}")
-        else:
-            print(f"   {result['error']}")
-        
-        # Test 4: List files
-        print("\n4️⃣ Listing files...")
-        files = github.list_files()
-        if files["success"]:
-            print(f"   📂 Found {files['count']} files:")
-            for f in files["files"][:5]:
-                print(f"      {f['type']} {f['name']}")
+        results = []
+        for fname in file_names:
+            result = self.delete_file(fname, confirm=True)
+            results.append(result)
+            time.sleep(0.5)
+        return {"success": True, "results": results}
     
-    print("\n" + "="*60)
-    print("✅ Test Complete!")
-    print("="*60)
+    # ================= 🆕 NEW METHOD 5: FILE EXISTS CHECK =================
+    def file_exists(self, file_name):
+        """Check if file exists in repository"""
+        result = self.read_file(file_name)
+        return result["success"]
