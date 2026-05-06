@@ -1,10 +1,10 @@
-# app.py - COMPLETE WORKING VERSION
+# app.py - COMPLETE WORKING VERSION (WITH CAPTCHA BOT)
 # ====================================================================
 # 📁 FILE: app.py
 # 🎯 ROLE: BOSS - Sab requests handle karta hai, routes manage karta hai
-# 🔗 USES: db.py, helpers.py, ai_service.py, blog_service.py, config.py
+# 🔗 USES: db.py, helpers.py, ai_service.py, blog_service.py, config.py, captcha_bot.py
 # 🔗 CALLED BY: Frontend (Vercel)
-# 📋 TOTAL ROUTES: 12
+# 📋 TOTAL ROUTES: 12 + CAPTCHA ROUTES = 16+
 # ====================================================================
 
 from flask import Flask, request, jsonify
@@ -22,6 +22,9 @@ from ai_service import detect_intent, generate_response
 from blog_service import get_blog_html
 from health_service import get_full_health_report, get_quick_status, auto_fix_all
 
+# ================= 🔥 NEW: CAPTCHA BOT IMPORT =================
+from captcha_bot import get_captcha_manager
+
 app = Flask(__name__)
 CORS(app)
 
@@ -31,6 +34,16 @@ cursor = get_cursor()
 
 # Track start time
 start_time = time.time()
+
+# ================= HELPER FUNCTIONS =================
+
+def get_captcha_manager_safe():
+    """Safely get captcha manager - handles initialization errors"""
+    try:
+        return get_captcha_manager()
+    except Exception as e:
+        print(f"⚠️ Captcha manager error: {e}")
+        return None
 
 # ================= HEALTH CHECK FUNCTIONS =================
 
@@ -63,7 +76,7 @@ def get_database_size():
         pass
     return "unknown"
 
-# ================= ROUTES =================
+# ================= MAIN ROUTES =================
 
 @app.route("/")
 def home():
@@ -78,7 +91,8 @@ def home():
             "Clickable blog links",
             "Fast responses",
             "Context recall",
-            "Modular architecture"
+            "Modular architecture",
+            "🔥 Captcha Bot Integration (NEW)"
         ]
     })
 
@@ -116,6 +130,15 @@ def status():
         total_messages = 0
         total_blogs = 0
     
+    # 🔥 Add captcha bot status to overall status
+    captcha_status = "not_initialized"
+    try:
+        manager = get_captcha_manager_safe()
+        if manager:
+            captcha_status = "running"
+    except:
+        captcha_status = "error"
+    
     return jsonify({
         "status": "ok" if db_ok else "error",
         "timestamp": datetime.utcnow().isoformat(),
@@ -127,7 +150,8 @@ def status():
             "total_blogs": total_blogs,
             "database_size": get_database_size()
         },
-        "backend_url": BACKEND_URL
+        "backend_url": BACKEND_URL,
+        "captcha_bot": captcha_status
     })
 
 @app.route("/campaigns")
@@ -270,13 +294,252 @@ def blog(slug):
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+
+# ================= 🔥 NEW: CAPTCHA BOT ROUTES =================
+# ====================================================================
+# 🎯 CAPTCHA BOT API ENDPOINTS
+# 🔗 USED BY: Frontend (Vercel) for bot monitoring
+# 📋 ROUTES: /api/captcha/status, /api/captcha/solve, /api/captcha/reset, /api/captcha/restart
+# ====================================================================
+
+@app.route("/api/captcha/status", methods=["GET"])
+def captcha_status():
+    """
+    🔥 CAPTCHA BOT STATUS - Full bot system status
+    GET /api/captcha/status
+    
+    Returns:
+    {
+        "success": true,
+        "status": {
+            "total_bots": 10,
+            "active_bots": 8,
+            "total_solved": 1234,
+            "total_errors": 5,
+            "uptime_hours": 2.5,
+            "bots": [...]
+        }
+    }
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        status = manager.get_all_stats()
+        summary = manager.get_summary()
+        
+        return jsonify({
+            "success": True,
+            "status": status,
+            "summary": summary,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
-# ====================================================================
-# HEALTH SERVICE ROUTES (NEW)
-# ====================================================================
+@app.route("/api/captcha/summary", methods=["GET"])
+def captcha_summary():
+    """
+    🔥 CAPTCHA BOT SUMMARY - Quick summary for dashboard
+    GET /api/captcha/summary
+    
+    Returns:
+    {
+        "success": true,
+        "total_bots": 10,
+        "active_bots": 8,
+        "total_solved": 1234,
+        "earning_inr": 37.02
+    }
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        summary = manager.get_summary()
+        
+        return jsonify({
+            "success": True,
+            "total_bots": summary.get("total_bots", 0),
+            "active_bots": summary.get("active_bots", 0),
+            "total_solved": summary.get("total_solved", 0),
+            "total_errors": summary.get("total_errors", 0),
+            "earning_usd": summary.get("earning_approx_usd", 0),
+            "earning_inr": summary.get("earning_approx_inr", 0),
+            "uptime_hours": summary.get("uptime_hours", 0),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/captcha/bot/<int:bot_id>", methods=["GET"])
+def captcha_bot_detail(bot_id):
+    """
+    🔥 SPECIFIC BOT DETAILS - Ek bot ki detail
+    GET /api/captcha/bot/1
+    
+    Returns specific bot's status
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        bot_info = manager.get_bot_by_id(bot_id)
+        
+        if not bot_info:
+            return jsonify({
+                "success": False,
+                "error": f"Bot {bot_id} not found"
+            }), 404
+        
+        return jsonify({
+            "success": True,
+            "bot_id": bot_id,
+            "solved_count": bot_info.get("solved_count", 0),
+            "error_count": bot_info.get("error_count", 0),
+            "is_active": bot_info.get("is_active", False),
+            "last_solve": bot_info.get("last_solve"),
+            "earning_usd": bot_info.get("earning_usd", 0),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/captcha/reset", methods=["POST"])
+def captcha_reset():
+    """
+    🔥 RESET CAPTCHA STATS - Sab stats zero karna
+    POST /api/captcha/reset
+    
+    Resets all bot statistics
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        manager.reset_all_stats()
+        
+        return jsonify({
+            "success": True,
+            "message": "All captcha bot stats reset successfully",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/captcha/restart", methods=["POST"])
+def captcha_restart():
+    """
+    🔥 RESTART CAPTCHA BOTS - Sab bots restart karna
+    POST /api/captcha/restart
+    
+    Stops and restarts all bots
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        manager.stop_all()
+        time.sleep(1)
+        manager.start_all()
+        
+        return jsonify({
+            "success": True,
+            "message": "All captcha bots restarted successfully",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/captcha/solve", methods=["POST"])
+def captcha_solve():
+    """
+    🔥 SOLVE CAPTCHA - Ek captcha solve karna
+    POST /api/captcha/solve
+    
+    Body: { "image": "base64_encoded_image_string" }
+    
+    Returns: { "success": true, "solution": "abc123" }
+    """
+    try:
+        data = request.json or {}
+        image_base64 = data.get("image")
+        
+        if not image_base64:
+            return jsonify({
+                "success": False,
+                "error": "No image provided"
+            }), 400
+        
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        solution = manager.solve_captcha(image_base64)
+        
+        if solution:
+            return jsonify({
+                "success": True,
+                "solution": solution,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Could not solve captcha (timeout or error)"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# ================= HEALTH SERVICE ROUTES (Existing) =================
 
 @app.route("/health/full")
 def health_full():
@@ -467,4 +730,6 @@ def health_dashboard():
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
 
-# ====================================================================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
