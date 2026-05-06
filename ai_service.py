@@ -1,10 +1,12 @@
 # ====================================================================
-# 📁 FILE: ai_service.py - COMPLETE WORKING VERSION
+# 📁 FILE: ai_service.py - COMPLETE WORKING VERSION (WITH CAPTCHA BOT)
 # 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
 # 🔗 USED BY: app.py
-# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py
-# 📋 TOTAL FUNCTIONS: 10
-# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat, create_file, update_file, delete_file, read_file, list_files, github_test, repo_info
+# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py, captcha_bot.py
+# 📋 TOTAL FUNCTIONS: 10 + Captcha Commands
+# 🎯 INTENTS DETECTED: count_questions, list_questions, blog, follow_up, recall, chat, 
+#    create_file, update_file, delete_file, read_file, list_files, github_test, repo_info,
+#    CAPTCHA_STATUS, CAPTCHA_ACTIVE_BOTS, CAPTCHA_EARNING, CAPTCHA_BOT_DETAIL, CAPTCHA_RESET
 # ====================================================================
 
 import requests
@@ -19,6 +21,10 @@ import db
 
 # ================= GITHUB AUTOMATION IMPORT =================
 from github_service import GitHubService
+
+# ================= 🔥 NEW: CAPTCHA BOT IMPORT =================
+from captcha_bot import get_captcha_manager
+
 
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
     """Single AI call with Mistral API"""
@@ -49,9 +55,36 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         print(f"AI Error: {e}")
         return "❌ Error occurred. Please try again."
 
+
 def detect_intent(text, history=None):
     """Advanced intent detection with context"""
     t = text.lower()
+    
+    # ================= 🔥 NEW: CAPTCHA BOT INTENTS =================
+    
+    # Captcha bot status (poore bots ka status)
+    if any(w in t for w in ["bot status", "bots ka status", "captcha status", "captcha bot status", "saare bots"]):
+        return "captcha_status"
+    
+    # Kitne bots active hain
+    if any(w in t for w in ["kitne bot active", "active bots", "kitne active", "bots active"]):
+        return "captcha_active_bots"
+    
+    # Kitna kamaaya / earning
+    if any(w in t for w in ["kitna kamaya", "kitna kamaaya", "earning", "kitna paisa", "income", "kitna profit"]):
+        return "captcha_earning"
+    
+    # Specific bot ki details (Bot 1, Bot 2, etc.)
+    if "bot" in t and any(str(i) in t for i in range(1, 11)):
+        return "captcha_bot_detail"
+    
+    # Reset stats
+    if any(w in t for w in ["reset stats", "stats reset", "captcha reset", "zero karo captcha"]):
+        return "captcha_reset"
+    
+    # Bot restart
+    if any(w in t for w in ["restart bot", "bot restart", "captcha restart", "bots restart karo"]):
+        return "captcha_restart"
     
     # ================= GITHUB AUTOMATION INTENTS =================
     # Create File
@@ -105,6 +138,7 @@ def detect_intent(text, history=None):
     
     return "chat"
 
+
 def generate_blog(topic):
     """Generate blog content"""
     system = f"""You are an expert writer. Create a detailed, engaging blog post about: {topic}
@@ -121,6 +155,7 @@ Use markdown formatting (**, *, etc). Keep it informative and engaging."""
     messages = [{"role": "system", "content": system}]
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
+
 # ================= GITHUB AUTOMATION HELPER FUNCTIONS =================
 
 def extract_file_name(message):
@@ -130,6 +165,7 @@ def extract_file_name(message):
         if '.' in word and len(word) > 3:
             return word
     return None
+
 
 def extract_code_from_message(message):
     """Message se code block extract karo"""
@@ -142,8 +178,141 @@ def extract_code_from_message(message):
             return code
     return None
 
+
+def extract_bot_id(message):
+    """Message se bot number extract karega (Bot 1, bot 2, etc.)"""
+    import re
+    numbers = re.findall(r'\d+', message.lower())
+    if numbers:
+        return int(numbers[0])
+    return None
+
+
+# ================= 🔥 NEW: CAPTCHA BOT HANDLERS =================
+
+def get_captcha_status_response():
+    """Captcha bot ka poora status return karega"""
+    try:
+        manager = get_captcha_manager()
+        summary = manager.get_summary()
+        all_stats = manager.get_all_stats()
+        
+        # Active bots details
+        active_bots = []
+        for bot in all_stats.get("bots", []):
+            if bot.get("is_active", True) and bot.get("solved_count", 0) > 0:
+                active_bots.append(f"   Bot {bot['bot_id']}: {bot['solved_count']} captchas")
+        
+        active_bots_text = "\n".join(active_bots[:5]) if active_bots else "   No activity yet"
+        
+        return f"""📊 **CAPTCHA BOT STATUS REPORT**
+═══════════════════════════════════════
+
+🤖 **Total Bots:** {summary['total_bots']}
+🟢 **Active Bots:** {summary['active_bots']}
+✅ **Total Captchas Solved:** {summary['total_solved']}
+💰 **Estimated Earning:** ₹{summary['earning_approx_inr']}
+⏱️ **Uptime:** {summary['uptime_hours']} hours
+
+📋 **Active Bots Details:**
+{active_bots_text}
+
+═══════════════════════════════════════
+💡 Tip: "Bot 1 ka status" bolkar specific bot dekh sakte ho!
+"""
+    except Exception as e:
+        return f"⚠️ Captcha bot system unavailable: {str(e)}"
+
+
+def get_captcha_active_bots_response():
+    """Sirf active bots count batayega"""
+    try:
+        manager = get_captcha_manager()
+        summary = manager.get_summary()
+        return f"🟢 {summary['active_bots']} out of {summary['total_bots']} bots active hain.\n✅ Total {summary['total_solved']} captchas solve ho chuke hain."
+    except Exception as e:
+        return f"⚠️ Captcha bot system unavailable: {str(e)}"
+
+
+def get_captcha_earning_response():
+    """Estimated earning batayega"""
+    try:
+        manager = get_captcha_manager()
+        summary = manager.get_summary()
+        return f"💰 **Estimated Earning:** ₹{summary['earning_approx_inr']}\n\n📊 Based on {summary['total_solved']} captchas solved at approx ₹0.03 per captcha."
+    except Exception as e:
+        return f"⚠️ Captcha bot system unavailable: {str(e)}"
+
+
+def get_captcha_bot_detail_response(message):
+    """Specific bot ki detail batayega (Bot 1, Bot 2, etc.)"""
+    try:
+        bot_id = extract_bot_id(message)
+        if not bot_id:
+            return "❓ Bot number batao — jaise 'Bot 1 ka status'"
+        
+        manager = get_captcha_manager()
+        bot_info = manager.get_bot_by_id(bot_id)
+        
+        if bot_info:
+            return f"""🤖 **Bot {bot_id} Details:**
+✅ Solved: {bot_info['solved_count']} captchas
+❌ Errors: {bot_info['error_count']}
+💰 Earning: ₹{round(bot_info.get('earning_usd', 0) * 85, 2)}
+📅 Last solve: {bot_info.get('last_solve', 'Never')}
+🟢 Status: {'Active' if bot_info.get('is_active', True) else 'Stopped'}"""
+        else:
+            return f"⚠️ Bot {bot_id} not found. Bot numbers 1 se {manager.bot_count} tak hain."
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
+
+
+def get_captcha_reset_response():
+    """Captcha bot stats reset karega"""
+    try:
+        manager = get_captcha_manager()
+        manager.reset_all_stats()
+        return "✅ Captcha bot stats reset kar diye gaye hain! Sab bots zero se start karenge."
+    except Exception as e:
+        return f"⚠️ Reset failed: {str(e)}"
+
+
+def get_captcha_restart_response():
+    """Captcha bots restart karega"""
+    try:
+        manager = get_captcha_manager()
+        manager.stop_all()
+        time.sleep(1)
+        manager.start_all()
+        return "🔄 Sab captcha bots restart kar diye gaye hain! Ab sab active hain."
+    except Exception as e:
+        return f"⚠️ Restart failed: {str(e)}"
+
+
+# ================= MAIN RESPONSE GENERATOR =================
+
 def generate_response(intent, message, history, all_history, campaign_id=None):
     """Generate smart response with full context"""
+    
+    # ================= 🔥 NEW: CAPTCHA BOT INTENT HANDLERS =================
+    
+    if intent == "captcha_status":
+        return get_captcha_status_response()
+    
+    elif intent == "captcha_active_bots":
+        return get_captcha_active_bots_response()
+    
+    elif intent == "captcha_earning":
+        return get_captcha_earning_response()
+    
+    elif intent == "captcha_bot_detail":
+        return get_captcha_bot_detail_response(message)
+    
+    elif intent == "captcha_reset":
+        return get_captcha_reset_response()
+    
+    elif intent == "captcha_restart":
+        return get_captcha_restart_response()
     
     # ================= FORCE GITHUB CHECK =================
     words = message.lower().split()
