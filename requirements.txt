@@ -1,5 +1,11 @@
-flask
+# File save karo
+echo "flask
 requests
 gunicorn
 flask-cors
-pytrends
+pytrends" > requirements.txt
+
+# Git push
+git add requirements.txt
+git commit -m "Final requirements.txt with all dependencies"
+git push
