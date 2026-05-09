@@ -1,22 +1,23 @@
-# captcha_bot.py - COMPLETE WORKING VERSION
+# captcha_bot.py - COMPLETE WORKING VERSION (DEATHBYCAPTCHA)
 # ====================================================================
 # 📁 FILE: captcha_bot.py
-# 🎯 ROLE: 2Captcha Bot - Automatic captcha solving system
+# 🎯 ROLE: DeathByCaptcha Bot - Automatic captcha solving system
 # 🔗 USED BY: ai_service.py (brain), app.py (endpoints)
-# 🔑 REQUIRES: config.py (API key, bot count, settings)
+# 🔑 REQUIRES: config.py (username, password, bot count, settings)
 # 🧪 TEST: python captcha_bot.py
 # ====================================================================
 
 import requests
 import time
 import base64
-import threading
 from datetime import datetime
+from requests.auth import HTTPBasicAuth
 
 # ================= IMPORT CONFIGURATION =================
 from config import (
-    CAPTCHA_API_KEY, 
-    CAPTCHA_TIMEOUT, 
+    CAPTCHA_USERNAME,
+    CAPTCHA_PASSWORD,
+    CAPTCHA_TIMEOUT,
     CAPTCHA_RETRY_COUNT,
     CAPTCHA_API_URL_SEND,
     CAPTCHA_API_URL_GET,
@@ -29,68 +30,52 @@ from config import (
 # ================= SINGLE BOT CLASS =================
 class SingleBot:
     """
-    🤖 EK BOT
-    ════════════════
+    🤖 EK BOT (DeathByCaptcha)
+    ════════════════════════
     Ye class ek single bot represent karti hai.
-    Har bot 2Captcha se captcha lega aur solve karega.
-    
-    PROPERTIES:
-    ├── bot_id: Bot ka unique number (1, 2, 3...)
-    ├── solved_count: Is bot ne kitne captchas solve kiye
-    ├── error_count: Is bot ko kitni errors aayi
-    ├── is_active: Bot active hai ya nahi
-    └── last_solve_time: Aakhri baar captcha kab solve kiya
-    
-    METHODS:
-    ├── solve(): Ek captcha solve karta hai
-    ├── get_stats(): Bot ki current status return karta hai
-    └── reset(): Stats reset karta hai
+    Har bot DeathByCaptcha se captcha lega aur solve karega.
     """
     
-    def __init__(self, bot_id, api_key):
+    def __init__(self, bot_id, username, password):
         self.bot_id = bot_id
-        self.api_key = api_key
+        self.username = username
+        self.password = password
         self.solved_count = 0
         self.error_count = 0
         self.is_active = True
         self.last_solve_time = None
         self.total_earning_usd = 0.0
         
-    def solve(self, image_base64):
+    def solve(self, image_path):
         """
         🔧 METHOD: solve()
         ════════════════════
-        Ek captcha solve karega.
+        Ek captcha solve karega using DeathByCaptcha API.
         
-        PROCESS:
-        1. Image ko 2Captcha server pe bhejega
-        2. Task ID receive karega
-        3. Solution ready hone tak wait karega
-        4. Solution return karega
-        
-        INPUT: base64 encoded image string
+        INPUT: image file path
         OUTPUT: Captcha solution text (string) ya None if failed
         """
         try:
-            # Step 1: Send captcha to 2Captcha server
-            send_data = {
-                "key": self.api_key,
-                "method": "base64",
-                "body": image_base64,
-                "json": 1
-            }
+            # Step 1: Send captcha to DeathByCaptcha server
+            with open(image_path, "rb") as f:
+                files = {"captchafile": f}
+                response = requests.post(
+                    CAPTCHA_API_URL_SEND,
+                    auth=HTTPBasicAuth(self.username, self.password),
+                    files=files,
+                    timeout=30
+                )
             
-            response = requests.post(CAPTCHA_API_URL_SEND, data=send_data, timeout=10)
             result = response.json()
             
             # Check if captcha was sent successfully
-            if result.get("status") != 1:
+            if result.get("status") != 0:
                 if CAPTCHA_DEBUG:
-                    print(f"[Bot {self.bot_id}] ❌ Send failed: {result.get('request')}")
+                    print(f"[Bot {self.bot_id}] ❌ Send failed: {result}")
                 self.error_count += 1
                 return None
             
-            captcha_id = result.get("request")
+            captcha_id = result.get("captcha")
             
             if CAPTCHA_DEBUG:
                 print(f"[Bot {self.bot_id}] 📤 Captcha sent! ID: {captcha_id}")
@@ -100,39 +85,30 @@ class SingleBot:
             for attempt in range(max_attempts):
                 time.sleep(2)
                 
-                get_data = {
-                    "key": self.api_key,
-                    "action": "get",
-                    "id": captcha_id,
-                    "json": 1
-                }
+                # Get solution
+                get_response = requests.get(
+                    f"{CAPTCHA_API_URL_GET}/{captcha_id}",
+                    auth=HTTPBasicAuth(self.username, self.password),
+                    timeout=30
+                )
                 
-                result = requests.get(CAPTCHA_API_URL_GET, params=get_data)
-                response_data = result.json()
+                result_data = get_response.json()
                 
                 # Check if solution is ready
-                if response_data.get("status") == 1:
-                    solution = response_data.get("request")
-                    self.solved_count += 1
-                    self.last_solve_time = datetime.now()
-                    # Approximate earning ($0.30 per 1000 captchas)
-                    self.total_earning_usd += 0.0003
-                    
-                    if CAPTCHA_DEBUG:
-                        print(f"[Bot {self.bot_id}] ✅ SOLVED: {solution} (Total: {self.solved_count})")
-                    return solution
+                if result_data.get("status") == 0:
+                    solution = result_data.get("text")
+                    if solution:
+                        self.solved_count += 1
+                        self.last_solve_time = datetime.now()
+                        # Approximate earning ($0.65 per 1000 captchas for worker)
+                        self.total_earning_usd += 0.00065
+                        
+                        if CAPTCHA_DEBUG:
+                            print(f"[Bot {self.bot_id}] ✅ SOLVED: {solution} (Total: {self.solved_count})")
+                        return solution
                 
-                # Check if still processing
-                elif "CAPCHA_NOT_READY" in str(response_data.get("request")):
-                    if CAPTCHA_DEBUG and attempt % 5 == 0:
-                        print(f"[Bot {self.bot_id}] ⏳ Waiting for solution... ({attempt+1}/{max_attempts})")
-                    continue
-                
-                # Some other error
-                else:
-                    if CAPTCHA_DEBUG:
-                        print(f"[Bot {self.bot_id}] ⚠️ Unknown response: {response_data}")
-                    continue
+                if CAPTCHA_DEBUG and attempt % 5 == 0:
+                    print(f"[Bot {self.bot_id}] ⏳ Waiting for solution... ({attempt+1}/{max_attempts})")
             
             # Timeout - no solution received
             if CAPTCHA_DEBUG:
@@ -153,13 +129,7 @@ class SingleBot:
             return None
     
     def get_stats(self):
-        """
-        📊 METHOD: get_stats()
-        ═══════════════════
-        Bot ki current status return karta hai.
-        
-        OUTPUT: Dictionary with bot details
-        """
+        """📊 Bot ki current status return karta hai"""
         return {
             "bot_id": self.bot_id,
             "solved_count": self.solved_count,
@@ -170,11 +140,7 @@ class SingleBot:
         }
     
     def reset_stats(self):
-        """
-        🔄 METHOD: reset_stats()
-        ════════════════════
-        Bot ke stats reset karta hai.
-        """
+        """🔄 Bot ke stats reset karta hai"""
         self.solved_count = 0
         self.error_count = 0
         self.total_earning_usd = 0.0
@@ -184,45 +150,21 @@ class SingleBot:
 # ================= BOT MANAGER CLASS =================
 class CaptchaBotManager:
     """
-    🎮 CAPTCHA BOT MANAGER
-    ══════════════════════
+    🎮 CAPTCHA BOT MANAGER (DeathByCaptcha)
+    ════════════════════════════════════
     Multiple bots ko manage karta hai.
-    Ye main class hai jo aap use karoge.
-    
-    PROPERTIES:
-    ├── bot_count: Total kitne bots hain
-    ├── bots: List of all bot objects
-    ├── total_solved: Sab bots ke total solved captchas
-    ├── start_time: System kab start hua
-    └── current_bot_index: Round-robin ke liye pointer
-    
-    METHODS:
-    ├── solve_captcha(): Captcha solve karne ke liye (main method)
-    ├── get_all_stats(): Sab bots ki status ek saath
-    ├── get_summary(): Short summary (dashboard ke liye)
-    ├── reset_all_stats(): Sab bots ke stats reset
-    ├── start_all(): Saare bots active karo
-    ├── stop_all(): Saare bots inactive karo
-    └── get_bot_by_id(): Specific bot ki status
     """
     
-    def __init__(self, api_key=None, bot_count=None):
-        """
-        🏗️ CONSTRUCTOR
-        ═════════════
-        CaptchaBotManager initialize karta hai.
-        
-        INPUT:
-        ├── api_key: 2Captcha API key (optional, config se lega)
-        └── bot_count: Kitne bots chahiye (optional, config se lega)
-        """
-        # Get values from config if not provided
-        if api_key is None:
-            api_key = CAPTCHA_API_KEY
+    def __init__(self, username=None, password=None, bot_count=None):
+        if username is None:
+            username = CAPTCHA_USERNAME
+        if password is None:
+            password = CAPTCHA_PASSWORD
         if bot_count is None:
             bot_count = CAPTCHA_BOT_COUNT
         
-        self.api_key = api_key
+        self.username = username
+        self.password = password
         self.bot_count = bot_count
         self.bots = []
         self.total_solved = 0
@@ -234,41 +176,28 @@ class CaptchaBotManager:
         # Create all bots
         print(f"[CaptchaBotManager] 🚀 Initializing {bot_count} bots...")
         for i in range(1, bot_count + 1):
-            bot = SingleBot(i, api_key)
+            bot = SingleBot(i, username, password)
             self.bots.append(bot)
         
         print(f"[CaptchaBotManager] ✅ {bot_count} bots created successfully!")
         print(f"[CaptchaBotManager] 📡 Platform: {CAPTCHA_PLATFORM}")
-        print(f"[CaptchaBotManager] ⏱️ Timeout: {CAPTCHA_TIMEOUT}s")
+        print(f"[CaptchaBotManager] 👤 Username: {username}")
     
-    def solve_captcha(self, image_base64):
+    def solve_captcha(self, image_path):
         """
         🔥 MAIN METHOD: solve_captcha()
-        ═════════════════════════════
-        Yeh method call karo captcha solve karne ke liye.
-        
-        HOW IT WORKS:
-        1. Round-robin method se bots ko select karta hai
-        2. Selected bot captcha solve karega
-        3. Solution return karega
-        
-        INPUT: base64 encoded image string
-        OUTPUT: Captcha solution text ya None
+        Captcha solve karne ke liye yeh method call karo.
         """
         if not self.is_running:
-            if CAPTCHA_DEBUG:
-                print("[CaptchaBotManager] ⚠️ Bot system is stopped")
             return None
         
-        # Try each bot once (round-robin)
         for _ in range(self.bot_count):
             bot = self.bots[self.current_bot_index]
             self.current_bot_index = (self.current_bot_index + 1) % self.bot_count
             
             if bot.is_active:
-                result = bot.solve(image_base64)
+                result = bot.solve(image_path)
                 if result:
-                    # Update totals
                     self.total_solved = sum(b.solved_count for b in self.bots)
                     self.total_errors = sum(b.error_count for b in self.bots)
                     return result
@@ -276,20 +205,7 @@ class CaptchaBotManager:
         return None
     
     def get_all_stats(self):
-        """
-        📊 METHOD: get_all_stats()
-        ════════════════════════
-        Sab bots ki complete status return karta hai.
-        
-        OUTPUT: Dictionary with:
-        ├── total_bots: Total bots count
-        ├── active_bots: Kitne active hain
-        ├── total_solved: Total captchas solved
-        ├── total_errors: Total errors
-        ├── uptime_seconds: Kitni der se chal raha hai
-        ├── bots: Har bot ki individual status
-        └── estimated_earning: Approx earning
-        """
+        """📊 Sab bots ki complete status return karta hai"""
         uptime = (datetime.now() - self.start_time).total_seconds()
         
         return {
@@ -307,13 +223,7 @@ class CaptchaBotManager:
         }
     
     def get_summary(self):
-        """
-        📋 METHOD: get_summary()
-        ═══════════════════════
-        Short summary — dashboard ke liye quick view.
-        
-        OUTPUT: Simple dictionary with key metrics
-        """
+        """📋 Short summary — dashboard ke liye"""
         return {
             "total_bots": self.bot_count,
             "active_bots": sum(1 for b in self.bots if b.is_active),
@@ -325,29 +235,20 @@ class CaptchaBotManager:
         }
     
     def _calculate_earning(self):
-        """
-        💰 INTERNAL METHOD: _calculate_earning()
-        ═══════════════════════════════════════
-        Estimated earning calculate karta hai.
-        Rate: $0.30 per 1000 captchas (approx)
-        """
+        """💰 Estimated earning calculate karta hai (DeathByCaptcha rate: $0.65/1000 to worker)"""
         total_solved = self.total_solved
-        estimated_usd = (total_solved / 1000) * 0.30
-        estimated_inr = estimated_usd * 85  # 1 USD = 85 INR approx
+        estimated_usd = (total_solved / 1000) * 0.65
+        estimated_inr = estimated_usd * 85
         
         return {
             "usd": estimated_usd,
             "inr": estimated_inr,
-            "per_1000_rate": 0.30,
+            "per_1000_rate": 0.65,
             "total_captchas": total_solved
         }
     
     def reset_all_stats(self):
-        """
-        🔄 METHOD: reset_all_stats()
-        ══════════════════════════
-        Sab bots ke stats reset karta hai.
-        """
+        """🔄 Sab bots ke stats reset karta hai"""
         for bot in self.bots:
             bot.reset_stats()
         self.total_solved = 0
@@ -370,32 +271,17 @@ class CaptchaBotManager:
         print("[CaptchaBotManager] ⏸️ All bots stopped!")
     
     def get_bot_by_id(self, bot_id):
-        """
-        🔍 METHOD: get_bot_by_id()
-        ════════════════════════
-        Specific bot ki status chahiye to.
-        
-        INPUT: bot_id (1 to bot_count)
-        OUTPUT: Bot stats dictionary ya None
-        """
+        """🔍 Specific bot ki status"""
         if 1 <= bot_id <= self.bot_count:
             return self.bots[bot_id - 1].get_stats()
         return None
 
 
 # ================= GLOBAL INSTANCE =================
-# Ek global instance create karo jo sab files use kar sakte hain
 _captcha_manager = None
 
 def get_captcha_manager():
-    """
-    🌍 GLOBAL FUNCTION: get_captcha_manager()
-    ═════════════════════════════════════════
-    Singleton pattern — ek hi instance sab files use karein.
-    
-    USE: from captcha_bot import get_captcha_manager
-         manager = get_captcha_manager()
-    """
+    """🌍 GLOBAL FUNCTION - Singleton pattern"""
     global _captcha_manager
     if _captcha_manager is None:
         _captcha_manager = CaptchaBotManager()
@@ -404,18 +290,10 @@ def get_captcha_manager():
 
 # ================= TEST CODE =================
 if __name__ == "__main__":
-    """
-    🧪 DIRECT TEST
-    ═════════════
-    Is file ko directly run karo to test karne ke liye.
-    
-    COMMAND: python captcha_bot.py
-    """
     print("\n" + "="*70)
-    print("🧪 CAPTCHA BOT SYSTEM - TEST MODE")
+    print("🧪 DEATHBYCAPTCHA BOT SYSTEM - TEST MODE")
     print("="*70)
     
-    # Create manager
     manager = CaptchaBotManager(bot_count=3)
     
     print("\n📊 Initial Status:")
@@ -424,12 +302,6 @@ if __name__ == "__main__":
     for key, value in summary.items():
         print(f"   {key}: {value}")
     
-    print("\n📋 Detailed Bot Status:")
-    print("-"*40)
-    all_stats = manager.get_all_stats()
-    for bot in all_stats["bots"]:
-        print(f"   Bot {bot['bot_id']}: Solved={bot['solved_count']}, Errors={bot['error_count']}")
-    
     print("\n" + "="*70)
     print("✅ Bot system ready! Use get_captcha_manager() in other files.")
-    print("="*70 + "\n")
+    print("="*70 + "\n")  
