@@ -80,6 +80,21 @@ def get_database_size():
 
 @app.route("/")
 def home():
+    # 🔥 NEW: Get captcha status for home endpoint
+    captcha_info = {}
+    try:
+        manager = get_captcha_manager_safe()
+        if manager:
+            summary = manager.get_summary()
+            captcha_info = {
+                "bots": summary.get("total_bots", 0),
+                "active": summary.get("active_bots", 0),
+                "solved": summary.get("total_solved", 0),
+                "earning_inr": summary.get("earning_approx_inr", 0)
+            }
+    except:
+        captcha_info = {"error": "Not initialized"}
+    
     return jsonify({
         "status": "AI System Running - Modular Structure",
         "version": "6.0",
@@ -93,7 +108,8 @@ def home():
             "Context recall",
             "Modular architecture",
             "🔥 Captcha Bot Integration (NEW)"
-        ]
+        ],
+        "captcha_bot": captcha_info
     })
 
 @app.route("/health")
@@ -112,6 +128,16 @@ def health():
 def ping():
     """Simple ping endpoint - returns fast response"""
     return "pong", 200
+
+@app.route("/keep-alive", methods=["GET"])
+def keep_alive():
+    """🔥 NEW: Keep Render awake - UptimeRobot ke liye (15 min inactive me sleep se bachne ke liye)"""
+    return jsonify({
+        "status": "awake",
+        "timestamp": datetime.utcnow().isoformat(),
+        "uptime_seconds": get_uptime(),
+        "message": "Service is running, captcha bot active"
+    }), 200
 
 @app.route("/status")
 def status():
@@ -532,6 +558,39 @@ def captcha_solve():
                 "error": "Could not solve captcha (timeout or error)"
             }), 500
             
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# ================= 🔥 NEW: PIPEDREAM TRIGGER ENDPOINT =================
+@app.route("/api/captcha/solve-auto", methods=["POST"])
+def captcha_solve_auto():
+    """
+    🔥 PIPEDREAM TRIGGER ENDPOINT - Pipedream workflow se call hoga
+    POST /api/captcha/solve-auto
+    
+    Returns: { "success": true, "message": "Bot is active", "stats": {...} }
+    """
+    try:
+        manager = get_captcha_manager_safe()
+        if not manager:
+            return jsonify({
+                "success": False,
+                "error": "Captcha bot system not initialized"
+            }), 503
+        
+        summary = manager.get_summary()
+        
+        return jsonify({
+            "success": True,
+            "message": "Bot is active and solving captchas",
+            "triggered_by": "pipedream",
+            "timestamp": datetime.utcnow().isoformat(),
+            "stats": summary
+        })
     except Exception as e:
         return jsonify({
             "success": False,
