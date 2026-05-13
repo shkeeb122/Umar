@@ -1,9 +1,9 @@
-# captcha_bot.py - COMPLETE WORKING VERSION (DEATHBYCAPTCHA)
+# captcha_bot.py - COMPLETE WORKING VERSION (CAPSOLVER)
 # ====================================================================
 # 📁 FILE: captcha_bot.py
-# 🎯 ROLE: DeathByCaptcha Bot - Automatic captcha solving system
+# 🎯 ROLE: CapSolver Bot - AI-powered automatic captcha solving system
 # 🔗 USED BY: ai_service.py (brain), app.py (endpoints)
-# 🔑 REQUIRES: config.py (username, password, bot count, settings)
+# 🔑 REQUIRES: config.py (API key, bot count, settings)
 # 🧪 TEST: python captcha_bot.py
 # ====================================================================
 
@@ -11,103 +11,98 @@ import requests
 import time
 import base64
 from datetime import datetime
-from requests.auth import HTTPBasicAuth
 
 # ================= IMPORT CONFIGURATION =================
 from config import (
-    CAPTCHA_USERNAME,
-    CAPTCHA_PASSWORD,
+    CAPTCHA_API_KEY,
     CAPTCHA_TIMEOUT,
-    CAPTCHA_RETRY_COUNT,
+    CAPTCHA_BOT_COUNT,
+    CAPTCHA_PLATFORM,
     CAPTCHA_API_URL_SEND,
     CAPTCHA_API_URL_GET,
-    CAPTCHA_DEBUG,
-    CAPTCHA_BOT_COUNT,
-    CAPTCHA_PLATFORM
+    CAPTCHA_DEBUG
 )
 
 
 # ================= SINGLE BOT CLASS =================
 class SingleBot:
     """
-    🤖 EK BOT (DeathByCaptcha)
-    ════════════════════════
+    🤖 EK BOT (CapSolver AI-Powered)
+    ════════════════════════════
     Ye class ek single bot represent karti hai.
-    Har bot DeathByCaptcha se captcha lega aur solve karega.
+    Har bot CapSolver se captcha lega aur AI se solve karega.
     """
     
-    def __init__(self, bot_id, username, password):
+    def __init__(self, bot_id, api_key):
         self.bot_id = bot_id
-        self.username = username
-        self.password = password
+        self.api_key = api_key
         self.solved_count = 0
         self.error_count = 0
         self.is_active = True
         self.last_solve_time = None
         self.total_earning_usd = 0.0
         
-    def solve(self, image_path):
+    def solve(self, image_base64):
         """
         🔧 METHOD: solve()
         ════════════════════
-        Ek captcha solve karega using DeathByCaptcha API.
+        AI-powered captcha solve using CapSolver API.
         
-        INPUT: image file path
+        INPUT: base64 encoded image string
         OUTPUT: Captcha solution text (string) ya None if failed
         """
         try:
-            # Step 1: Send captcha to DeathByCaptcha server
-            with open(image_path, "rb") as f:
-                files = {"captchafile": f}
-                response = requests.post(
-                    CAPTCHA_API_URL_SEND,
-                    auth=HTTPBasicAuth(self.username, self.password),
-                    files=files,
-                    timeout=30
-                )
+            # Step 1: Create task on CapSolver
+            send_data = {
+                "clientKey": self.api_key,
+                "task": {
+                    "type": "ImageToTextTask",
+                    "body": image_base64
+                }
+            }
             
+            response = requests.post(CAPTCHA_API_URL_SEND, json=send_data, timeout=10)
             result = response.json()
             
-            # Check if captcha was sent successfully
-            if result.get("status") != 0:
+            # Check if task was created successfully
+            if result.get("errorId") != 0:
                 if CAPTCHA_DEBUG:
-                    print(f"[Bot {self.bot_id}] ❌ Send failed: {result}")
+                    print(f"[Bot {self.bot_id}] ❌ Task creation failed: {result}")
                 self.error_count += 1
                 return None
             
-            captcha_id = result.get("captcha")
+            task_id = result.get("taskId")
             
             if CAPTCHA_DEBUG:
-                print(f"[Bot {self.bot_id}] 📤 Captcha sent! ID: {captcha_id}")
+                print(f"[Bot {self.bot_id}] 📤 Task created! ID: {task_id}")
             
-            # Step 2: Wait for solution (polling)
+            # Step 2: Poll for solution
             max_attempts = CAPTCHA_TIMEOUT // 2
             for attempt in range(max_attempts):
                 time.sleep(2)
                 
-                # Get solution
-                get_response = requests.get(
-                    f"{CAPTCHA_API_URL_GET}/{captcha_id}",
-                    auth=HTTPBasicAuth(self.username, self.password),
-                    timeout=30
-                )
+                get_data = {
+                    "clientKey": self.api_key,
+                    "taskId": task_id
+                }
                 
-                result_data = get_response.json()
+                result_response = requests.post(CAPTCHA_API_URL_GET, json=get_data)
+                response_data = result_response.json()
                 
                 # Check if solution is ready
-                if result_data.get("status") == 0:
-                    solution = result_data.get("text")
+                if response_data.get("status") == "ready":
+                    solution = response_data.get("solution", {}).get("text")
                     if solution:
                         self.solved_count += 1
                         self.last_solve_time = datetime.now()
-                        # Approximate earning ($0.65 per 1000 captchas for worker)
-                        self.total_earning_usd += 0.00065
+                        # Approximate earning ($0.40 per 1000 captchas)
+                        self.total_earning_usd += 0.0004
                         
                         if CAPTCHA_DEBUG:
                             print(f"[Bot {self.bot_id}] ✅ SOLVED: {solution} (Total: {self.solved_count})")
                         return solution
                 
-                if CAPTCHA_DEBUG and attempt % 5 == 0:
+                elif CAPTCHA_DEBUG and attempt % 5 == 0:
                     print(f"[Bot {self.bot_id}] ⏳ Waiting for solution... ({attempt+1}/{max_attempts})")
             
             # Timeout - no solution received
@@ -150,21 +145,18 @@ class SingleBot:
 # ================= BOT MANAGER CLASS =================
 class CaptchaBotManager:
     """
-    🎮 CAPTCHA BOT MANAGER (DeathByCaptcha)
-    ════════════════════════════════════
+    🎮 CAPTCHA BOT MANAGER (CapSolver)
+    ════════════════════════════════
     Multiple bots ko manage karta hai.
     """
     
-    def __init__(self, username=None, password=None, bot_count=None):
-        if username is None:
-            username = CAPTCHA_USERNAME
-        if password is None:
-            password = CAPTCHA_PASSWORD
+    def __init__(self, api_key=None, bot_count=None):
+        if api_key is None:
+            api_key = CAPTCHA_API_KEY
         if bot_count is None:
             bot_count = CAPTCHA_BOT_COUNT
         
-        self.username = username
-        self.password = password
+        self.api_key = api_key
         self.bot_count = bot_count
         self.bots = []
         self.total_solved = 0
@@ -174,19 +166,19 @@ class CaptchaBotManager:
         self.is_running = True
         
         # Create all bots
-        print(f"[CaptchaBotManager] 🚀 Initializing {bot_count} bots...")
+        print(f"[CaptchaBotManager] 🚀 Initializing {bot_count} bots with CapSolver...")
         for i in range(1, bot_count + 1):
-            bot = SingleBot(i, username, password)
+            bot = SingleBot(i, api_key)
             self.bots.append(bot)
         
         print(f"[CaptchaBotManager] ✅ {bot_count} bots created successfully!")
         print(f"[CaptchaBotManager] 📡 Platform: {CAPTCHA_PLATFORM}")
-        print(f"[CaptchaBotManager] 👤 Username: {username}")
     
-    def solve_captcha(self, image_path):
+    def solve_captcha(self, image_base64):
         """
         🔥 MAIN METHOD: solve_captcha()
         Captcha solve karne ke liye yeh method call karo.
+        INPUT: base64 encoded image string
         """
         if not self.is_running:
             return None
@@ -196,7 +188,7 @@ class CaptchaBotManager:
             self.current_bot_index = (self.current_bot_index + 1) % self.bot_count
             
             if bot.is_active:
-                result = bot.solve(image_path)
+                result = bot.solve(image_base64)
                 if result:
                     self.total_solved = sum(b.solved_count for b in self.bots)
                     self.total_errors = sum(b.error_count for b in self.bots)
@@ -235,15 +227,15 @@ class CaptchaBotManager:
         }
     
     def _calculate_earning(self):
-        """💰 Estimated earning calculate karta hai (DeathByCaptcha rate: $0.65/1000 to worker)"""
+        """💰 Estimated earning calculate karta hai (CapSolver rate: $0.40/1000)"""
         total_solved = self.total_solved
-        estimated_usd = (total_solved / 1000) * 0.65
+        estimated_usd = (total_solved / 1000) * 0.40
         estimated_inr = estimated_usd * 85
         
         return {
             "usd": estimated_usd,
             "inr": estimated_inr,
-            "per_1000_rate": 0.65,
+            "per_1000_rate": 0.40,
             "total_captchas": total_solved
         }
     
@@ -291,7 +283,7 @@ def get_captcha_manager():
 # ================= TEST CODE =================
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("🧪 DEATHBYCAPTCHA BOT SYSTEM - TEST MODE")
+    print("🧪 CAPSOLVER BOT SYSTEM - TEST MODE")
     print("="*70)
     
     manager = CaptchaBotManager(bot_count=3)
@@ -304,4 +296,4 @@ if __name__ == "__main__":
     
     print("\n" + "="*70)
     print("✅ Bot system ready! Use get_captcha_manager() in other files.")
-    print("="*70 + "\n")  
+    print("="*70 + "\n")
