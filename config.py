@@ -1,4 +1,4 @@
-# config.py - COMPLETE WORKING VERSION (DEATHBYCAPTCHA)
+# config.py - COMPLETE WORKING VERSION (CAPSOLVER)
 # ====================================================================
 # 📁 FILE: config.py
 # 🎯 ROLE: SETTINGS - Sab API keys aur URLs yahan
@@ -28,18 +28,17 @@ GITHUB_REPO = "Umar"
 GITHUB_BRANCH = "main"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
-# ================= 🔥 CAPTCHA BOT CONFIGURATION (DEATHBYCAPTCHA) =================
-# DeathByCaptcha uses Username + Password (NOT API Key)
+# ================= 🔥 CAPSOLVER CONFIGURATION =================
+# CapSolver uses API Key (starts with CAP-)
 
-# DeathByCaptcha Credentials
-CAPTCHA_USERNAME = os.environ.get("CAPTCHA_USERNAME", "shkeeb")  # ← apna username daalo
-CAPTCHA_PASSWORD = os.environ.get("CAPTCHA_PASSWORD", "your_password")  # ← apna password daalo
+# Main API Key for CapSolver (from your dashboard)
+CAPTCHA_API_KEY = os.environ.get("CAPTCHA_API_KEY", "YOUR_CAPSOLVER_API_KEY_HERE")
 
 # How many bots to run (10 bots = 10 parallel workers)
 CAPTCHA_BOT_COUNT = int(os.environ.get("CAPTCHA_BOT_COUNT", "10"))
 
 # Platform name
-CAPTCHA_PLATFORM = os.environ.get("CAPTCHA_PLATFORM", "deathbycaptcha")
+CAPTCHA_PLATFORM = os.environ.get("CAPTCHA_PLATFORM", "capsolver")
 
 # Timeout in seconds for waiting captcha solution
 CAPTCHA_TIMEOUT = int(os.environ.get("CAPTCHA_TIMEOUT", "30"))
@@ -47,9 +46,10 @@ CAPTCHA_TIMEOUT = int(os.environ.get("CAPTCHA_TIMEOUT", "30"))
 # How many times to retry if captcha fails
 CAPTCHA_RETRY_COUNT = int(os.environ.get("CAPTCHA_RETRY_COUNT", "3"))
 
-# DeathByCaptcha API Endpoints
-CAPTCHA_API_URL_SEND = "https://api.deathbycaptcha.com/api/captcha"
-CAPTCHA_API_URL_GET = "https://api.deathbycaptcha.com/api/captcha"
+# 🔥 CapSolver API Endpoints
+CAPTCHA_API_URL_SEND = "https://api.capsolver.com/createTask"
+CAPTCHA_API_URL_GET = "https://api.capsolver.com/getTaskResult"
+CAPTCHA_BALANCE_URL = "https://api.capsolver.com/getBalance"
 
 # Debug mode - True = show extra logs
 CAPTCHA_DEBUG = os.environ.get("CAPTCHA_DEBUG", "False").lower() == "true"
@@ -62,8 +62,8 @@ if not GITHUB_TOKEN:
     print("⚠️ WARNING: GITHUB_TOKEN not set in Render Environment Variables!")
 
 # Captcha config validation
-if CAPTCHA_USERNAME and CAPTCHA_PASSWORD:
-    print(f"✅ DeathByCaptcha Config: {CAPTCHA_BOT_COUNT} bots, Platform: {CAPTCHA_PLATFORM}")
-    print(f"🔑 Username: {CAPTCHA_USERNAME}")
+if CAPTCHA_API_KEY:
+    print(f"✅ CapSolver Config: {CAPTCHA_BOT_COUNT} bots, Platform: {CAPTCHA_PLATFORM}")
+    print(f"🔑 API Key: {CAPTCHA_API_KEY[:15]}...")
 else:
-    print("⚠️ WARNING: CAPTCHA_USERNAME/PASSWORD not set! Captcha bot will not work.")
+    print("⚠️ WARNING: CAPTCHA_API_KEY not set! Captcha bot will not work.")
