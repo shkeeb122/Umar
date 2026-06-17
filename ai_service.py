@@ -1,112 +1,109 @@
 # ====================================================================
-# 📁 FILE: ai_service.py - ULTRA FAST + COMMAND SYSTEM
-# 🎯 ROLE: BRAIN - System ka dimag, sochta hai, samajhta hai
-# 🔗 USED BY: app.py
-# 🔗 USES: db.py, helpers.py, blog_service.py, config.py, github_service.py, captcha_bot.py
-# 📋 TOTAL FUNCTIONS: 12 + COMMAND SYSTEM (Extensible)
+# 📁 FILE: ai_service.py - VERSION 1 (BASIC)
+# 🎯 ROLE: BRAIN - Basic version with GitHub automation
+# 📋 TOTAL FUNCTIONS: 10
+# 🔧 FEATURES: Basic intent detection, File analysis, Blog generation
 # ====================================================================
 
 import requests
 import time
 import uuid
+import re
+import ast
 from datetime import datetime
-import random
 
-# ================= CONFIG (Fast API) =================
-# DeepSeek API (3-5x faster than Mistral, 80% cheaper)
-DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_HEADERS = {
-    "Authorization": "Bearer YOUR_DEEPSEEK_API_KEY",
-    "Content-Type": "application/json"
-}
-DEEPSEEK_MODEL = "deepseek-chat"
-
-# Backup Mistral (if DeepSeek fails)
-MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_HEADERS = {"Authorization": "Bearer YOUR_MISTRAL_API_KEY", "Content-Type": "application/json"}
-MISTRAL_MODEL = "mistral-medium"
-
-# ================= IMPORTS =================
-from config import BACKEND_URL
+from config import MISTRAL_URL, HEADERS, MODEL_NAME, BACKEND_URL
 from db import get_recent_history, get_all_history, count_questions, save_message, update_campaign, save_generated_content
 from helpers import is_question, format_response, extract_topic, create_slug
 import db
 from github_service import GitHubService
-from captcha_bot import get_captcha_manager
 
-# ================= COMMAND SYSTEM (SMART) =================
-# Yeh dictionary har command ko ek function se map karega
-# Naya command add karo → Bus yahan entry add karo → Purana system nahi tutega
 
-COMMANDS = {}
+# ================= AI CODE GENERATION =================
+def generate_code_with_ai(file_name, description):
+    """AI se code generate karaye"""
+    prompt = f"""Write Python code for a file named '{file_name}'.
+Description: {description}
 
-def register_command(name, handler, keywords):
-    """Naya command register karne ka smart tarika"""
-    COMMANDS[name] = {
-        "handler": handler,
-        "keywords": keywords
+Requirements:
+- Include proper imports
+- Add class and/or functions as needed
+- Add docstrings
+- Only return the code, no explanations
+- Make it production-ready
+
+Write the complete code:"""
+    
+    messages = [{"role": "user", "content": prompt}]
+    code = ai_chat(messages, temperature=0.8, max_tokens=2000)
+    
+    if '```python' in code:
+        code = code.split('```python')[1].split('```')[0]
+    elif '```' in code:
+        code = code.split('```')[1].split('```')[0]
+    
+    return code.strip()
+
+
+# ================= FILE STRUCTURE ANALYSIS =================
+def analyze_file_structure(content):
+    """Python file ka structure analyze karo"""
+    result = {
+        "functions": [],
+        "classes": [],
+        "imports": [],
+        "line_count": len(content.split('\n')),
+        "function_count": 0,
+        "class_count": 0
+    }
+    
+    try:
+        tree = ast.parse(content)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                result["functions"].append({
+                    "name": node.name,
+                    "line": node.lineno,
+                    "docstring": ast.get_docstring(node) or ""
+                })
+            elif isinstance(node, ast.ClassDef):
+                result["classes"].append({
+                    "name": node.name,
+                    "line": node.lineno,
+                    "methods": len([m for m in node.body if isinstance(m, ast.FunctionDef)])
+                })
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    result["imports"].append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                result["imports"].append(f"{node.module}")
+    except:
+        pass
+    
+    result["function_count"] = len(result["functions"])
+    result["class_count"] = len(result["classes"])
+    return result
+
+
+# ================= FILE METRICS =================
+def get_file_metrics(content):
+    """File ke metrics calculate karo"""
+    lines = content.split('\n')
+    return {
+        "total_lines": len(lines),
+        "code_lines": len([l for l in lines if l.strip() and not l.strip().startswith('#')]),
+        "comment_lines": len([l for l in lines if l.strip().startswith('#')]),
+        "blank_lines": len([l for l in lines if not l.strip()]),
+        "size_kb": len(content.encode('utf-8')) / 1024
     }
 
-def detect_intent(text, history=None):
-    """Advanced intent detection with command system"""
-    t = text.lower()
-    
-    # 1. Check registered commands first
-    for cmd_name, cmd_data in COMMANDS.items():
-        if any(kw in t for kw in cmd_data["keywords"]):
-            return cmd_name
-    
-    # 2. Original intents (backward compatible)
-    # ================= CAPTCHA BOT INTENTS =================
-    if any(w in t for w in ["bot status", "bots ka status", "captcha status", "captcha bot status", "saare bots"]):
-        return "captcha_status"
-    if any(w in t for w in ["kitne bot active", "active bots", "kitne active", "bots active"]):
-        return "captcha_active_bots"
-    if any(w in t for w in ["kitna kamaya", "kitna kamaaya", "earning", "kitna paisa", "income", "kitna profit"]):
-        return "captcha_earning"
-    if "bot" in t and any(str(i) in t for i in range(1, 11)):
-        return "captcha_bot_detail"
-    if any(w in t for w in ["reset stats", "stats reset", "captcha reset", "zero karo captcha"]):
-        return "captcha_reset"
-    if any(w in t for w in ["restart bot", "bot restart", "captcha restart", "bots restart karo"]):
-        return "captcha_restart"
-    
-    # ================= GITHUB INTENTS =================
-    if any(w in t for w in ["बनाओ", "create", "नई file", "new file", "file banao"]):
-        return "create_file"
-    if any(w in t for w in ["update", "बदलो", "edit", "change", "modify"]):
-        return "update_file"
-    if any(w in t for w in ["delete", "हटाओ", "remove", "mitao"]):
-        return "delete_file"
-    if any(w in t for w in ["दिखाओ", "read", "show", "dekho", "content"]):
-        return "read_file"
-    if any(w in t for w in ["files list", "कौन कौन files", "list files", "saari files", "all files"]):
-        return "list_files"
-    if any(w in t for w in ["github test", "connection check", "test connection", "github check"]):
-        return "github_test"
-    if any(w in t for w in ["repo info", "repository info", "github info"]):
-        return "repo_info"
-    
-    # ================= ORIGINAL INTENTS =================
-    if any(w in t for w in ["kitne sawal", "total sawal", "how many question", "sawal kiye", "kitne question"]):
-        return "count_questions"
-    if any(w in t for w in ["kaun kaun se sawal", "kya kya sawal", "list questions", "sawal list", "which questions"]):
-        return "list_questions"
-    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "generate blog", "blog banao"]):
-        return "blog"
-    if any(w in t for w in ["aur batao", "tell more", "elaborate", "explain more", "aur details", "aur info"]):
-        return "follow_up"
-    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad", "kya tha"]):
-        return "recall"
-    
-    return "chat"
 
-# ================= AI CHAT (FAST - DeepSeek) =================
+# ================= ORIGINAL AI CHAT =================
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Ultra fast AI call - DeepSeek API (3-5x faster than Mistral)"""
+    """Single AI call with Mistral API"""
     try:
         payload = {
-            "model": DEEPSEEK_MODEL,
+            "model": MODEL_NAME,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -114,16 +111,15 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         }
         
         start_time = time.time()
-        r = requests.post(DEEPSEEK_URL, headers=DEEPSEEK_HEADERS, json=payload, timeout=30)  # 30 sec timeout
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
         
         if r.status_code != 200:
-            # Fallback to Mistral if DeepSeek fails
-            return ai_chat_fallback(messages, temperature, max_tokens)
+            return "⚠️ Server busy. Please try again."
         
         data = r.json()
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         
-        print(f"⚡ AI Response time: {time.time() - start_time:.2f}s (DeepSeek)")
+        print(f"AI Response time: {time.time() - start_time:.2f}s")
         return response.strip() if response else "I'm not sure how to respond."
         
     except requests.exceptions.Timeout:
@@ -132,50 +128,81 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         print(f"AI Error: {e}")
         return "❌ Error occurred. Please try again."
 
-def ai_chat_fallback(messages, temperature=0.7, max_tokens=1000):
-    """Mistral API fallback (slower but reliable)"""
-    try:
-        payload = {
-            "model": MISTRAL_MODEL,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "top_p": 0.95
-        }
-        start_time = time.time()
-        r = requests.post(MISTRAL_URL, headers=MISTRAL_HEADERS, json=payload, timeout=50)
-        if r.status_code != 200:
-            return "⚠️ Server busy. Please try again."
-        data = r.json()
-        response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        print(f"🐢 AI Response time: {time.time() - start_time:.2f}s (Mistral fallback)")
-        return response.strip() if response else "I'm not sure how to respond."
-    except:
-        return "⚠️ Both APIs failed. Please try later."
 
-# ================= BLOG GENERATION (FAST) =================
-def generate_blog(topic):
-    """Generate blog content using fast AI"""
-    system = f"""You are an expert writer. Create a detailed, engaging blog post about: {topic}
-Format with:
-- Catchy title with emoji at beginning
-- Introduction paragraph
-- Clear sections with headings (use ## for subheadings)
-- Bullet points where helpful using *
-- Strong conclusion
-Use markdown formatting (**, *, etc)."""
-    messages = [{"role": "system", "content": system}]
-    return ai_chat(messages, temperature=0.8, max_tokens=2000)
+# ================= INTENT DETECTION =================
+def detect_intent(text, history=None):
+    """Basic intent detection"""
+    t = text.lower()
+    
+    # GitHub automation intents
+    create_keywords = ["बनाओ", "create", "नई file", "new file", "file banao", "bana do", "make", "generate", "create file"]
+    if any(w in t for w in create_keywords):
+        return "create_file"
+    
+    update_keywords = ["update", "बदलो", "edit", "change", "modify", "badlo", "improve", "fix"]
+    if any(w in t for w in update_keywords):
+        return "update_file"
+    
+    delete_keywords = ["delete", "हटाओ", "remove", "mitao", "delete karo", "hata do"]
+    if any(w in t for w in delete_keywords):
+        return "delete_file"
+    
+    read_keywords = ["दिखाओ", "read", "show", "dekho", "content", "dikhade", "dikha do", "batao", "kholo"]
+    if any(w in t for w in read_keywords):
+        return "read_file"
+    
+    list_keywords = ["files list", "list files", "saari files", "all files", "file list", "meri files", 
+                     "github files", "files dikhao", "files batao", "saari filein", "sab files", "kitni files"]
+    if any(w in t for w in list_keywords):
+        return "list_files"
+    
+    test_keywords = ["github test", "connection check", "test connection", "github check"]
+    if any(w in t for w in test_keywords):
+        return "github_test"
+    
+    info_keywords = ["repo info", "repository info", "github info", "repo details"]
+    if any(w in t for w in info_keywords):
+        return "repo_info"
+    
+    # Original intents
+    if any(w in t for w in ["kitne sawal", "total sawal", "how many question"]):
+        return "count_questions"
+    
+    if any(w in t for w in ["kaun kaun se sawal", "list questions", "sawal list"]):
+        return "list_questions"
+    
+    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "blog banao"]):
+        return "blog"
+    
+    if any(w in t for w in ["aur batao", "tell more", "elaborate", "aur details"]):
+        return "follow_up"
+    
+    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad"]):
+        return "recall"
+    
+    return "chat"
 
-# ================= GITHUB HELPER FUNCTIONS =================
+
+# ================= HELPER FUNCTIONS =================
 def extract_file_name(message):
+    """Message se file name extract karo"""
     words = message.split()
     for word in words:
         if '.' in word and len(word) > 3:
             return word
     return None
 
+def extract_topic_from_message(message):
+    """Message se topic extract karo (file creation ke liye)"""
+    message_lower = message.lower()
+    remove_words = ["बनाओ", "create", "banao", "file", "meri", "my", "github", "pe", "mein", "karo", "make", "new"]
+    for word in remove_words:
+        message_lower = message_lower.replace(word, "")
+    topic = " ".join(message_lower.split())
+    return topic if topic else "sample"
+
 def extract_code_from_message(message):
+    """Message se code block extract karo"""
     if '```' in message:
         parts = message.split('```')
         if len(parts) >= 2:
@@ -185,257 +212,215 @@ def extract_code_from_message(message):
             return code
     return None
 
-def extract_bot_id(message):
-    import re
-    numbers = re.findall(r'\d+', message.lower())
-    if numbers:
-        return int(numbers[0])
-    return None
+def generate_blog(topic):
+    """Generate blog content"""
+    system = f"You are an expert writer. Create a detailed, engaging blog post about: {topic}"
+    messages = [{"role": "system", "content": system}]
+    return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
-# ================= CAPTCHA BOT HANDLERS =================
-def get_captcha_status_response():
-    try:
-        manager = get_captcha_manager()
-        summary = manager.get_summary()
-        all_stats = manager.get_all_stats()
-        active_bots = []
-        for bot in all_stats.get("bots", []):
-            if bot.get("is_active", True) and bot.get("solved_count", 0) > 0:
-                active_bots.append(f"   Bot {bot['bot_id']}: {bot['solved_count']} captchas")
-        active_bots_text = "\n".join(active_bots[:5]) if active_bots else "   No activity yet"
-        return f"""📊 **CAPTCHA BOT STATUS REPORT**
-═══════════════════════════════════════
-🤖 **Total Bots:** {summary['total_bots']}
-🟢 **Active Bots:** {summary['active_bots']}
-✅ **Total Captchas Solved:** {summary['total_solved']}
-💰 **Estimated Earning:** ₹{summary['earning_approx_inr']}
-⏱️ **Uptime:** {summary['uptime_hours']} hours
-📋 **Active Bots Details:**
-{active_bots_text}
-═══════════════════════════════════════
-💡 Tip: "Bot 1 ka status" bolkar specific bot dekh sakte ho!"""
-    except Exception as e:
-        return f"⚠️ Captcha bot system unavailable: {str(e)}"
 
-def get_captcha_active_bots_response():
-    try:
-        manager = get_captcha_manager()
-        summary = manager.get_summary()
-        return f"🟢 {summary['active_bots']} out of {summary['total_bots']} bots active hain.\n✅ Total {summary['total_solved']} captchas solve ho chuke hain."
-    except Exception as e:
-        return f"⚠️ Captcha bot system unavailable: {str(e)}"
-
-def get_captcha_earning_response():
-    try:
-        manager = get_captcha_manager()
-        summary = manager.get_summary()
-        return f"💰 **Estimated Earning:** ₹{summary['earning_approx_inr']}\n\n📊 Based on {summary['total_solved']} captchas solved at approx ₹0.03 per captcha."
-    except Exception as e:
-        return f"⚠️ Captcha bot system unavailable: {str(e)}"
-
-def get_captcha_bot_detail_response(message):
-    try:
-        bot_id = extract_bot_id(message)
-        if not bot_id:
-            return "❓ Bot number batao — jaise 'Bot 1 ka status'"
-        manager = get_captcha_manager()
-        bot_info = manager.get_bot_by_id(bot_id)
-        if bot_info:
-            return f"""🤖 **Bot {bot_id} Details:**
-✅ Solved: {bot_info['solved_count']} captchas
-❌ Errors: {bot_info['error_count']}
-💰 Earning: ₹{round(bot_info.get('earning_usd', 0) * 85, 2)}
-📅 Last solve: {bot_info.get('last_solve', 'Never')}
-🟢 Status: {'Active' if bot_info.get('is_active', True) else 'Stopped'}"""
-        else:
-            return f"⚠️ Bot {bot_id} not found. Bot numbers 1 se {manager.bot_count} tak hain."
-    except Exception as e:
-        return f"⚠️ Error: {str(e)}"
-
-def get_captcha_reset_response():
-    try:
-        manager = get_captcha_manager()
-        manager.reset_all_stats()
-        return "✅ Captcha bot stats reset kar diye gaye hain! Sab bots zero se start karenge."
-    except Exception as e:
-        return f"⚠️ Reset failed: {str(e)}"
-
-def get_captcha_restart_response():
-    try:
-        manager = get_captcha_manager()
-        manager.stop_all()
-        time.sleep(1)
-        manager.start_all()
-        return "🔄 Sab captcha bots restart kar diye gaye hain! Ab sab active hain."
-    except Exception as e:
-        return f"⚠️ Restart failed: {str(e)}"
-
-# ================= GENERATE RESPONSE (COMMAND SYSTEM + ORIGINAL) =================
+# ================= RESPONSE GENERATION =================
 def generate_response(intent, message, history, all_history, campaign_id=None):
-    """Generate smart response with full context"""
+    """Generate response based on intent"""
     
-    # 1. Handle registered commands (extensible)
-    if intent in COMMANDS:
-        return COMMANDS[intent]["handler"](message, history, all_history, campaign_id)
+    # Force check for read file
+    words = message.lower().split()
+    has_file = any('.' in w and len(w) > 3 for w in words)
+    has_read = any(w in message.lower() for w in ["दिखाओ", "read", "show", "dekho", "content"])
     
-    # 2. Original intent handlers (backward compatible)
-    # ===== CAPTCHA BOT =====
-    if intent == "captcha_status":
-        return get_captcha_status_response()
-    elif intent == "captcha_active_bots":
-        return get_captcha_active_bots_response()
-    elif intent == "captcha_earning":
-        return get_captcha_earning_response()
-    elif intent == "captcha_bot_detail":
-        return get_captcha_bot_detail_response(message)
-    elif intent == "captcha_reset":
-        return get_captcha_reset_response()
-    elif intent == "captcha_restart":
-        return get_captcha_restart_response()
+    if has_file and has_read and intent == "chat":
+        intent = "read_file"
     
-    # ===== GITHUB AUTOMATION =====
-    elif intent == "create_file":
+    # ================= CREATE FILE =================
+    if intent == "create_file":
         github = GitHubService()
         file_name = extract_file_name(message)
+        
         if not file_name:
-            return "❓ कौन सी file बनानी है? File name बताओ (जैसे: test.py)"
+            topic = extract_topic_from_message(message)
+            file_name = topic.replace(" ", "_") + ".py"
+            if not file_name or file_name == ".py":
+                return "❓ Kaun si file banani hai? File name batao (jaise: payment.py)"
+        
         code = extract_code_from_message(message)
+        
         if not code:
-            code = f"# {file_name}\n# Auto-created by AI System\n# Created: {datetime.utcnow().isoformat()}\n\n"
+            topic = extract_topic_from_message(message)
+            if not topic or topic == file_name.replace(".py", ""):
+                topic = file_name.replace(".py", "")
+            code = generate_code_with_ai(file_name, topic)
+        
+        timestamp = datetime.utcnow().isoformat()
+        header = f"# File: {file_name}\n# Created: {timestamp}\n# Auto-generated by AI System\n\n"
+        code = header + code
+        
         result = github.create_file(file_name, code)
+        
         if result["success"]:
-            return f"✅ **{result['message']}**\n📁 **File:** `{file_name}`\n🔗 **URL:** {result['file_url']}"
+            lines_count = len(code.split('\n'))
+            size_kb = len(code.encode('utf-8')) / 1024
+            preview = code[:500] + ("..." if len(code) > 500 else "")
+            
+            response_text = f"✅ File created: {file_name}\n\n"
+            response_text += f"📊 Stats: {lines_count} lines, {size_kb:.1f} KB\n\n"
+            response_text += f"📝 Preview:\n```python\n{preview}\n```\n\n"
+            response_text += f"🔗 URL: {result['file_url']}"
+            return response_text
         else:
-            return f"❌ File नहीं बन पाई: {result['error']}"
+            return f"❌ File nahi ban pai: {result['error']}"
     
+    # ================= UPDATE FILE =================
     elif intent == "update_file":
         github = GitHubService()
         file_name = extract_file_name(message)
+        
         if not file_name:
-            return "❓ कौन सी file update करनी है? File name बताओ।"
+            return "❓ Kaun si file update karni hai? File name batao."
+        
         new_code = extract_code_from_message(message)
         if not new_code:
             read_result = github.read_file(file_name)
             if read_result["success"]:
                 content_preview = read_result['content'][:500]
-                return f"📄 **Current content of `{file_name}`:**\n```python\n{content_preview}\n```"
+                return f"📄 Current content of {file_name}:\n```python\n{content_preview}\n```\n\nTo update, send new code in a code block"
             else:
-                return f"❌ File पढ़ नहीं पाए: {read_result['error']}"
+                return f"❌ File padh nahi paye: {read_result['error']}"
+        
         result = github.update_file(file_name, new_code)
+        
         if result["success"]:
-            return f"✅ **{result['message']}**\n📁 **File:** `{file_name}`\n🔗 **URL:** {result['file_url']}"
+            return f"✅ File updated: {file_name}\n🔗 URL: {result['file_url']}"
         else:
-            return f"❌ File update नहीं हो पाई: {result['error']}"
+            return f"❌ File update nahi hui: {result['error']}"
     
+    # ================= DELETE FILE =================
     elif intent == "delete_file":
         github = GitHubService()
         file_name = extract_file_name(message)
+        
         if not file_name:
-            return "❓ कौन सी file delete करनी है? File name बताओ।"
-        result = github.delete_file(file_name)
-        if result["success"]:
-            return f"✅ **{result['message']}**\n📁 **File:** `{file_name}`"
-        else:
-            return f"❌ File delete नहीं हो पाई: {result['error']}"
+            return "❓ Kaun si file delete karni hai? File name batao."
+        
+        return f"⚠️ Confirm Delete: Kya aap {file_name} ko delete karna chahte ho? Reply with 'confirm delete {file_name}'"
     
+    # ================= READ FILE =================
     elif intent == "read_file":
         github = GitHubService()
         file_name = extract_file_name(message)
+        
         if not file_name:
-            return "❓ कौन सी file पढ़नी है? File name बताओ।"
+            return "❓ Kaun si file padhni hai? File name batao."
+        
         result = github.read_file(file_name)
+        
         if result["success"]:
             content = result['content']
-            function_count = content.count('def ') + content.count('async def ')
-            if len(content) > 2000:
-                content = content[:2000] + "\n\n... (file बड़ी है, पूरी नहीं दिखा सकते)"
-            return f"📄 **{file_name}** ({function_count} functions)\n```python\n{content}\n```\n🔗 {result['file_url']}"
+            structure = analyze_file_structure(content)
+            metrics = get_file_metrics(content)
+            
+            response_text = f"📄 {file_name}\n\n"
+            response_text += f"📍 Location: /{file_name}\n"
+            response_text += f"📏 Size: {metrics['size_kb']:.1f} KB\n"
+            response_text += f"📊 Lines: {metrics['total_lines']} total\n"
+            response_text += f"🔧 Functions: {structure['function_count']}\n"
+            response_text += f"📦 Classes: {structure['class_count']}\n\n"
+            
+            file_content = content[:1500] + ("..." if len(content) > 1500 else "")
+            response_text += f"📝 Content:\n```python\n{file_content}\n```\n\n"
+            response_text += f"🔗 {result['file_url']}"
+            
+            return response_text
         else:
-            return f"❌ File पढ़ नहीं पाए: {result['error']}"
+            return f"❌ File padh nahi paye: {result['error']}"
     
+    # ================= LIST FILES =================
     elif intent == "list_files":
         github = GitHubService()
         result = github.list_files()
+        
         if result["success"]:
             if result["count"] == 0:
-                return "📂 Repository खाली है।"
-            files_list = "\n".join([f"{f['type']} `{f['name']}`" for f in result["files"][:20]])
-            return f"📂 **Repository Files ({result['count']} total):**\n{files_list}"
+                return "📂 Repository khali hai."
+            
+            py_files = [f for f in result["files"] if f['name'].endswith('.py')]
+            other_files = [f for f in result["files"] if not f['name'].endswith('.py')]
+            
+            response_text = f"📂 Repository Files\n📊 Total: {result['count']} files\n\n"
+            
+            if py_files:
+                response_text += f"🐍 Python Files ({len(py_files)}):\n"
+                for f in py_files[:10]:
+                    response_text += f"   📄 {f['name']}\n"
+            
+            if other_files:
+                response_text += f"\n📄 Other Files ({len(other_files)}):\n"
+                for f in other_files[:5]:
+                    response_text += f"   📄 {f['name']}\n"
+            
+            return response_text
         else:
-            return f"❌ Files list नहीं मिली: {result['error']}"
+            return f"❌ Files list nahi mili: {result['error']}"
     
+    # ================= GITHUB TEST =================
     elif intent == "github_test":
         github = GitHubService()
         result = github.test_connection()
+        
         if result["success"]:
-            return f"""{result['message']}
-🔗 **Repo:** {result['repo_url']}
-🔒 **Private:** {result['private']}
-⭐ **Stars:** {result['stars']}"""
+            return f"🔌 GitHub Connection OK\n\n📁 Repo: {result['repo_url']}\n🔒 Private: {result['private']}\n⭐ Stars: {result['stars']}"
         else:
-            return f"❌ {result['error']}"
+            return f"❌ Connection failed: {result['error']}"
     
+    # ================= REPO INFO =================
     elif intent == "repo_info":
         github = GitHubService()
         result = github.get_repo_info()
+        
         if result["success"]:
-            return f"""📁 **{result['name']}**
-🔗 **URL:** {result['url']}
-📝 **Description:** {result['description']}
-⭐ **Stars:** {result['stars']}
-🍴 **Forks:** {result['forks']}
-💻 **Language:** {result['language']}
-🔒 **Private:** {result['private']}"""
+            return f"📊 Repo Info\n\n📁 Name: {result['name']}\n⭐ Stars: {result['stars']}\n🍴 Forks: {result['forks']}\n💻 Language: {result['language']}"
         else:
-            return f"❌ {result['error']}"
+            return f"❌ Could not fetch: {result['error']}"
     
-    # ===== ORIGINAL INTENTS =====
+    # ================= ORIGINAL INTENTS =================
     elif intent == "count_questions":
-        total = count_questions()
-        return f"📊 **{total}** सवाल पूछे जा चुके हैं।"
+        return f"📊 Total questions: {count_questions()}"
     
     elif intent == "list_questions":
         questions = get_all_history()
         if not questions:
-            return "📋 अभी तक कोई सवाल नहीं पूछा गया।"
-        q_list = "\n".join([f"{i+1}. {q[0][:100]}" for i, q in enumerate(questions[:10])])
-        return f"📋 **पिछले सवाल:**\n{q_list}"
+            return "No questions yet."
+        return "📝 Questions:\n" + "\n".join([f"• {q[0]}" for q in questions[-10:]])
     
     elif intent == "blog":
         topic = extract_topic(message)
         if not topic:
-            return "📝 किस topic पर blog लिखूं? Topic बताओ।"
+            return "📝 What topic for blog?"
         return generate_blog(topic)
     
     elif intent == "follow_up":
-        return "🤔 किस बारे में और बताऊं? पिछली बातचीत से topic बताओ।"
+        return "Tell me more about what you'd like to know."
     
     elif intent == "recall":
         recent = get_recent_history(5)
         if not recent:
-            return "📜 मुझे कुछ याद नहीं आ रहा। नई बातचीत शुरू करो!"
-        return "📜 **पिछली बातचीत:**\n" + "\n".join([f"• {q[0][:80]}" for q in recent])
+            return "I don't remember anything."
+        return "📜 Previous:\n" + "\n".join([f"• {q[0]}" for q in recent])
     
-    # ===== DEFAULT CHAT =====
+    # ================= DEFAULT CHAT =================
     else:
         if not history:
             history = []
-        messages = [{"role": "system", "content": "You are a helpful AI assistant. Answer questions clearly and concisely. Be friendly and helpful."}]
+        messages = [{"role": "system", "content": "You are a helpful AI assistant."}]
         messages.extend(history[-10:])
         messages.append({"role": "user", "content": message})
         return ai_chat(messages, temperature=0.7, max_tokens=500)
 
-# ================= COMMAND REGISTRATION (EXAMPLE) =================
-# Naya command add karne ka tarika:
-# register_command("my_new_command", my_handler_function, ["keyword1", "keyword2"])
-# Isse purana system nahi tutega.
 
-# Example: "playwright" command
-def playwright_command_handler(message, history, all_history, campaign_id):
-    return "✅ Playwright system ready. Use 'playwright start' to begin automation."
-
-register_command("playwright", playwright_command_handler, ["playwright", "automation start"])
-
-# ====================================================================
-# END OF FILE - Complete, Fast, Smart, Extensible
-# ====================================================================
+# ================= INITIALIZE =================
+print("=" * 60)
+print("📁 VERSION 1: BASIC AI SERVICE LOADED")
+print("=" * 60)
+print("✅ GitHub Automation: READY")
+print("✅ File Analysis: READY")
+print("✅ Blog Generation: READY")
+print("=" * 60)
