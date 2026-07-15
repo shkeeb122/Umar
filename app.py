@@ -1,9 +1,4 @@
-# app.py - COMPLETE OPTIMIZED VERSION (ALL FIXES APPLIED)
-# ====================================================================
-# 📁 FILE: app.py
-# 🎯 ROLE: BOSS - Optimized with batch writes, single DB read
-# 🔧 FIXES: Removed double query, batch writes, faster responses
-# ====================================================================
+# app.py - SAFE VERSION (Sirf zaroori changes)
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -19,8 +14,6 @@ from helpers import is_question, format_response, validate_message, sanitize_tex
 from ai_service import detect_intent, generate_response
 from blog_service import get_blog_html
 from health_service import get_full_health_report, get_quick_status, auto_fix_all
-
-# ================= CAPTCHA BOT IMPORT =================
 from captcha_bot import get_captcha_manager
 
 app = Flask(__name__)
@@ -36,48 +29,15 @@ start_time = time.time()
 # ================= HELPER FUNCTIONS =================
 
 def get_captcha_manager_safe():
-    """Safely get captcha manager - handles initialization errors"""
     try:
         return get_captcha_manager()
     except Exception as e:
         print(f"⚠️ Captcha manager error: {e}")
         return None
 
-# ================= 🔥 BATCH WRITE FUNCTION =================
-def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
-    """🔥 OPTIMIZED: Ek hi transaction mein 3 writes"""
-    from db import get_connection
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        # 1. User message
-        cursor.execute(
-            "INSERT INTO messages (id, campaign_id, role, content, is_question, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), campaign_id, "user", user_msg, is_ques, now)
-        )
-        # 2. Assistant message
-        cursor.execute(
-            "INSERT INTO messages (id, campaign_id, role, content, is_question, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), campaign_id, "assistant", assistant_msg, 0, now)
-        )
-        # 3. Update campaign
-        new_count = count_questions(campaign_id)
-        cursor.execute(
-            "UPDATE campaigns SET updated_at=?, message_count=message_count+2, question_count=? WHERE id=?",
-            (now, new_count, campaign_id)
-        )
-        conn.commit()
-        return new_count
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
 # ================= HEALTH CHECK FUNCTIONS =================
 
 def check_database():
-    """Check if database is accessible"""
     try:
         from db import cursor
         cursor.execute("SELECT 1")
@@ -87,11 +47,9 @@ def check_database():
         return False, str(e)
 
 def get_uptime():
-    """Get server uptime in seconds"""
     return int(time.time() - start_time)
 
 def get_database_size():
-    """Get database file size"""
     try:
         if os.path.exists("ai_system.db"):
             size = os.path.getsize("ai_system.db")
@@ -124,13 +82,10 @@ def home():
         captcha_info = {"error": "Not initialized"}
     
     return jsonify({
-        "status": "AI System Running - Optimized",
-        "version": "7.0",
+        "status": "AI System Running - Modular Structure",
+        "version": "6.0",
         "features": [
-            "🔥 OPTIMIZED: Single DB read",
-            "🔥 OPTIMIZED: Batch writes",
-            "🔥 OPTIMIZED: 5s timeout",
-            "Perfect question counter",
+            "Perfect question counter (full history)",
             "Chat delete & restore",
             "Chat rename",
             "Full memory (all messages)",
@@ -138,14 +93,13 @@ def home():
             "Fast responses",
             "Context recall",
             "Modular architecture",
-            "🔥 Captcha Bot Integration"
+            "🔥 Captcha Bot Integration (NEW)"
         ],
         "captcha_bot": captcha_info
     })
 
 @app.route("/health")
 def health():
-    """Health check endpoint for UptimeRobot - ALWAYS RETURNS 200"""
     db_ok, db_msg = check_database()
     return jsonify({
         "status": "healthy" if db_ok else "degraded",
@@ -157,12 +111,10 @@ def health():
 
 @app.route("/ping")
 def ping():
-    """Simple ping endpoint - returns fast response"""
     return "pong", 200
 
 @app.route("/keep-alive", methods=["GET"])
 def keep_alive():
-    """🔥 Keep Render awake - UptimeRobot ke liye"""
     return jsonify({
         "status": "awake",
         "timestamp": datetime.utcnow().isoformat(),
@@ -172,7 +124,6 @@ def keep_alive():
 
 @app.route("/status")
 def status():
-    """Detailed status for monitoring"""
     db_ok, db_msg = check_database()
     try:
         from db import cursor
@@ -254,15 +205,15 @@ def command():
         intent = detect_intent(query)
         response = generate_response(intent, query, [], [], campaign_id)
         
-        # 🔥 Batch write
-        save_messages_batch(campaign_id, query, response, is_ques, now)
+        save_message(str(uuid.uuid4()), campaign_id, "user", query, is_ques, now)
+        save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
         create_campaign(campaign_id, query[:50], now, 2, is_ques, query[:100])
         
         return jsonify({"campaign_id": campaign_id, "response": format_response(response), "intent": intent})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ================= 🔥 OPTIMIZED CHAT ROUTE =================
+# ================= 🔥 FIXED CHAT ROUTE (Original + 1 Change) =================
 @app.route("/chat/<campaign_id>", methods=["POST"])
 def chat(campaign_id):
     try:
@@ -285,7 +236,7 @@ def chat(campaign_id):
         now = datetime.utcnow().isoformat()
         is_ques = 1 if is_question(message) else 0
         
-        # 🔥 FIX 1: Sirf recent history load karo (all_history hatao)
+        # 🔥 SIRF 1 CHANGE: all_history ko comment karo
         # all_history = get_all_history(campaign_id)  # ✅ COMMENT KARO
         recent_history = get_recent_history(campaign_id, 20)
         intent = detect_intent(message, recent_history)
@@ -302,17 +253,17 @@ def chat(campaign_id):
             delete_campaign(campaign_id, now)
             return jsonify({"response": "🗑️ **चैट डिलीट हो गई!** नई चैट शुरू करें।", "intent": "delete", "deleted": True})
         
-        # 🔥 FIX 2: all_history ki jagah recent_history bhejo
+        # 🔥 Generate response - all_history ki jagah recent_history bhejo
         response = generate_response(intent, message, recent_history, recent_history, campaign_id)
         
-        # 🔥 FIX 3: Batch write - Ek hi function mein 3 writes
-        new_question_count = save_messages_batch(campaign_id, message, response, is_ques, now)
+        # Original writes (safe)
+        save_message(str(uuid.uuid4()), campaign_id, "user", message, is_ques, now)
+        save_message(str(uuid.uuid4()), campaign_id, "assistant", response, 0, now)
         
-        return jsonify({
-            "response": format_response(response),
-            "intent": intent,
-            "question_count": new_question_count
-        })
+        new_question_count = count_questions(campaign_id)
+        update_campaign(campaign_id, now, 2, new_question_count, message[:100])
+        
+        return jsonify({"response": format_response(response), "intent": intent, "question_count": new_question_count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -353,7 +304,6 @@ def blog(slug):
         return "<h1>Blog not found</h1>", 404
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
-
 
 # ================= CAPTCHA BOT ROUTES =================
 
@@ -557,7 +507,6 @@ def captcha_solve_auto():
             "error": str(e)
         }), 500
 
-
 # ================= HEALTH SERVICE ROUTES =================
 
 @app.route("/health/full")
@@ -743,7 +692,6 @@ def health_dashboard():
         return html
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
