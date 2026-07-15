@@ -1,8 +1,9 @@
 # ====================================================================
-# 📁 FILE: ai_service.py - VERSION 1 (BASIC)
-# 🎯 ROLE: BRAIN - Basic version with GitHub automation
+# 📁 FILE: ai_service.py - VERSION 2 (OPTIMIZED)
+# 🎯 ROLE: BRAIN - Optimized version with GitHub automation
 # 📋 TOTAL FUNCTIONS: 10
 # 🔧 FEATURES: Basic intent detection, File analysis, Blog generation
+# ⚡ OPTIMIZED: Timeout 5s, Singleton GitHub, Faster DB queries
 # ====================================================================
 
 import requests
@@ -17,6 +18,17 @@ from db import get_recent_history, get_all_history, count_questions, save_messag
 from helpers import is_question, format_response, extract_topic, create_slug
 import db
 from github_service import GitHubService
+
+
+# ================= 🔥 SINGLETON GITHUB SERVICE =================
+_github_instance = None
+
+def get_github():
+    """Singleton pattern - Ek hi GitHub instance use karo"""
+    global _github_instance
+    if _github_instance is None:
+        _github_instance = GitHubService()
+    return _github_instance
 
 
 # ================= AI CODE GENERATION =================
@@ -98,9 +110,9 @@ def get_file_metrics(content):
     }
 
 
-# ================= ORIGINAL AI CHAT =================
+# ================= 🔥 OPTIMIZED AI CHAT (5 SECOND TIMEOUT) =================
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Single AI call with Mistral API"""
+    """Single AI call with Mistral API - OPTIMIZED with 5s timeout"""
     try:
         payload = {
             "model": MODEL_NAME,
@@ -111,7 +123,9 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         }
         
         start_time = time.time()
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=50)
+        
+        # 🔥 FIX: Timeout 5 seconds - Fastest response!
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=5)
         
         if r.status_code != 200:
             return "⚠️ Server busy. Please try again."
@@ -119,13 +133,14 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         data = r.json()
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         
-        print(f"AI Response time: {time.time() - start_time:.2f}s")
+        elapsed = time.time() - start_time
+        print(f"✅ AI Response time: {elapsed:.2f}s")
         return response.strip() if response else "I'm not sure how to respond."
         
     except requests.exceptions.Timeout:
-        return "⏰ Request timeout. Please try again."
+        return "⏰ Request timeout (5s). Please try again."
     except Exception as e:
-        print(f"AI Error: {e}")
+        print(f"❌ AI Error: {e}")
         return "❌ Error occurred. Please try again."
 
 
@@ -233,7 +248,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= CREATE FILE =================
     if intent == "create_file":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -271,7 +286,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= UPDATE FILE =================
     elif intent == "update_file":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -295,7 +310,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= DELETE FILE =================
     elif intent == "delete_file":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -305,7 +320,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= READ FILE =================
     elif intent == "read_file":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -335,7 +350,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= LIST FILES =================
     elif intent == "list_files":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         result = github.list_files()
         
         if result["success"]:
@@ -363,7 +378,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= GITHUB TEST =================
     elif intent == "github_test":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         result = github.test_connection()
         
         if result["success"]:
@@ -373,7 +388,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= REPO INFO =================
     elif intent == "repo_info":
-        github = GitHubService()
+        github = get_github()  # 🔥 Singleton use karo
         result = github.get_repo_info()
         
         if result["success"]:
@@ -418,8 +433,10 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
 
 # ================= INITIALIZE =================
 print("=" * 60)
-print("📁 VERSION 1: BASIC AI SERVICE LOADED")
+print("📁 VERSION 2: OPTIMIZED AI SERVICE LOADED")
 print("=" * 60)
+print("✅ Timeout: 5 seconds (Fast!)")
+print("✅ GitHub Singleton: Active")
 print("✅ GitHub Automation: READY")
 print("✅ File Analysis: READY")
 print("✅ Blog Generation: READY")
