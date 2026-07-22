@@ -1,9 +1,9 @@
 # ====================================================================
-# 📁 FILE: ai_service.py - VERSION 2 (OPTIMIZED)
-# 🎯 ROLE: BRAIN - Optimized version with GitHub automation
+# 📁 FILE: ai_service.py - VERSION 3 (FIXED)
+# 🎯 ROLE: BRAIN - Fixed version with 15s timeout
 # 📋 TOTAL FUNCTIONS: 10
 # 🔧 FEATURES: Basic intent detection, File analysis, Blog generation
-# ⚡ OPTIMIZED: Timeout 5s, Singleton GitHub, Faster DB queries
+# ⚡ FIXED: Timeout 15s (No more timeout errors!)
 # ====================================================================
 
 import requests
@@ -110,9 +110,9 @@ def get_file_metrics(content):
     }
 
 
-# ================= 🔥 OPTIMIZED AI CHAT (5 SECOND TIMEOUT) =================
+# ================= 🔥 FIXED AI CHAT (15 SECOND TIMEOUT) =================
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Single AI call with Mistral API - OPTIMIZED with 5s timeout"""
+    """Single AI call with Mistral API - FIXED with 15s timeout"""
     try:
         payload = {
             "model": MODEL_NAME,
@@ -124,8 +124,8 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         
         start_time = time.time()
         
-        # 🔥 FIX: Timeout 5 seconds - Fastest response!
-        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=5)
+        # 🔥 FIXED: Timeout 15 seconds - No more timeout errors!
+        r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=15)
         
         if r.status_code != 200:
             return "⚠️ Server busy. Please try again."
@@ -138,7 +138,7 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         return response.strip() if response else "I'm not sure how to respond."
         
     except requests.exceptions.Timeout:
-        return "⏰ Request timeout (5s). Please try again."
+        return "⏰ Request timeout (15s). Please try again."
     except Exception as e:
         print(f"❌ AI Error: {e}")
         return "❌ Error occurred. Please try again."
@@ -433,9 +433,9 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
 
 # ================= INITIALIZE =================
 print("=" * 60)
-print("📁 VERSION 2: OPTIMIZED AI SERVICE LOADED")
+print("📁 VERSION 3: FIXED AI SERVICE LOADED")
 print("=" * 60)
-print("✅ Timeout: 5 seconds (Fast!)")
+print("✅ Timeout: 15 seconds (Fixed!)")
 print("✅ GitHub Singleton: Active")
 print("✅ GitHub Automation: READY")
 print("✅ File Analysis: READY")
