@@ -1,9 +1,9 @@
 # ====================================================================
-# 📁 FILE: ai_service.py - VERSION 3 (FIXED)
-# 🎯 ROLE: BRAIN - Fixed version with 15s timeout
+# 📁 FILE: ai_service.py - CUSTOMIZED VERSION
+# 🎯 ROLE: BRAIN - Customized with 15s timeout
 # 📋 TOTAL FUNCTIONS: 10
-# 🔧 FEATURES: Basic intent detection, File analysis, Blog generation
-# ⚡ FIXED: Timeout 15s (No more timeout errors!)
+# 🔧 FEATURES: Intent detection, File analysis, Blog generation
+# ⚡ CUSTOMIZED: Timeout 15s (No timeout errors!)
 # ====================================================================
 
 import requests
@@ -110,9 +110,9 @@ def get_file_metrics(content):
     }
 
 
-# ================= 🔥 FIXED AI CHAT (15 SECOND TIMEOUT) =================
+# ================= 🔥 CUSTOMIZED AI CHAT (15 SECOND TIMEOUT) =================
 def ai_chat(messages, temperature=0.7, max_tokens=1000):
-    """Single AI call with Mistral API - FIXED with 15s timeout"""
+    """Single AI call with Mistral API - CUSTOMIZED with 15s timeout"""
     try:
         payload = {
             "model": MODEL_NAME,
@@ -124,7 +124,7 @@ def ai_chat(messages, temperature=0.7, max_tokens=1000):
         
         start_time = time.time()
         
-        # 🔥 FIXED: Timeout 15 seconds - No more timeout errors!
+        # 🔥 CUSTOMIZED: Timeout 15 seconds - No more timeout errors!
         r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=15)
         
         if r.status_code != 200:
@@ -248,7 +248,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= CREATE FILE =================
     if intent == "create_file":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -286,7 +286,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= UPDATE FILE =================
     elif intent == "update_file":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -310,7 +310,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= DELETE FILE =================
     elif intent == "delete_file":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -320,7 +320,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= READ FILE =================
     elif intent == "read_file":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         file_name = extract_file_name(message)
         
         if not file_name:
@@ -350,7 +350,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= LIST FILES =================
     elif intent == "list_files":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         result = github.list_files()
         
         if result["success"]:
@@ -378,7 +378,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= GITHUB TEST =================
     elif intent == "github_test":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         result = github.test_connection()
         
         if result["success"]:
@@ -388,7 +388,7 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
     
     # ================= REPO INFO =================
     elif intent == "repo_info":
-        github = get_github()  # 🔥 Singleton use karo
+        github = get_github()
         result = github.get_repo_info()
         
         if result["success"]:
@@ -433,9 +433,9 @@ def generate_response(intent, message, history, all_history, campaign_id=None):
 
 # ================= INITIALIZE =================
 print("=" * 60)
-print("📁 VERSION 3: FIXED AI SERVICE LOADED")
+print("📁 CUSTOMIZED AI SERVICE LOADED")
 print("=" * 60)
-print("✅ Timeout: 15 seconds (Fixed!)")
+print("✅ Timeout: 15 seconds (Customized!)")
 print("✅ GitHub Singleton: Active")
 print("✅ GitHub Automation: READY")
 print("✅ File Analysis: READY")
