@@ -1,9 +1,10 @@
-# app.py - COMPLETE FIXED VERSION (ALL PROBLEMS SOLVED)
+# app.py - COMPLETE WORKING VERSION (CAPTCHA BOT REMOVED)
 # ====================================================================
 # 📁 FILE: app.py
-# 🎯 ROLE: BOSS - Fixed version with batch writes & single DB read
-# 🔧 FIXES: Removed all_history, batch writes, 3x faster!
-# 📋 TOTAL ROUTES: 12 + CAPTCHA ROUTES = 16+
+# 🎯 ROLE: BOSS - Customized for your system
+# 🔧 FIXES: Removed all_history, batch writes, keep-alive ON
+# 🗑️ REMOVED: Captcha Bot (all routes, imports, functions)
+# 📋 TOTAL ROUTES: ~12
 # ====================================================================
 
 from flask import Flask, request, jsonify
@@ -21,8 +22,7 @@ from ai_service import detect_intent, generate_response
 from blog_service import get_blog_html
 from health_service import get_full_health_report, get_quick_status, auto_fix_all
 
-# ================= CAPTCHA BOT IMPORT =================
-from captcha_bot import get_captcha_manager
+# ✅ CAPTCHA BOT IMPORT REMOVED
 
 app = Flask(__name__)
 CORS(app)
@@ -36,15 +36,9 @@ start_time = time.time()
 
 # ================= HELPER FUNCTIONS =================
 
-def get_captcha_manager_safe():
-    """Safely get captcha manager - handles initialization errors"""
-    try:
-        return get_captcha_manager()
-    except Exception as e:
-        print(f"⚠️ Captcha manager error: {e}")
-        return None
+# ✅ get_captcha_manager_safe() REMOVED
 
-# ================= 🔥 BATCH WRITE FUNCTION (NEW) =================
+# ================= 🔥 BATCH WRITE FUNCTION =================
 def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
     """🔥 OPTIMIZED: Ek hi transaction mein 3 writes - 3x faster!"""
     from db import get_connection
@@ -110,27 +104,13 @@ def get_database_size():
 
 @app.route("/")
 def home():
-    captcha_info = {}
-    try:
-        manager = get_captcha_manager_safe()
-        if manager:
-            summary = manager.get_summary()
-            captcha_info = {
-                "bots": summary.get("total_bots", 0),
-                "active": summary.get("active_bots", 0),
-                "solved": summary.get("total_solved", 0),
-                "earning_inr": summary.get("earning_approx_inr", 0)
-            }
-    except:
-        captcha_info = {"error": "Not initialized"}
-    
     return jsonify({
-        "status": "AI System Running - FIXED VERSION",
+        "status": "AI System Running - Customized",
         "version": "7.0",
         "features": [
-            "🔥 FIXED: Single DB read (no more all_history)",
-            "🔥 FIXED: Batch writes (3x faster)",
-            "🔥 FIXED: 15s timeout",
+            "🔥 Customized: Single DB read (no all_history)",
+            "🔥 Customized: Batch writes (3x faster)",
+            "🔥 Customized: 15s timeout",
             "Perfect question counter (full history)",
             "Chat delete & restore",
             "Chat rename",
@@ -139,14 +119,13 @@ def home():
             "Fast responses",
             "Context recall",
             "Modular architecture",
-            "🔥 Captcha Bot Integration"
-        ],
-        "captcha_bot": captcha_info
+            "🔥 Keep-Alive Enabled"
+        ]
     })
 
 @app.route("/health")
 def health():
-    """Health check endpoint for UptimeRobot - ALWAYS RETURNS 200"""
+    """Health check endpoint - ALWAYS RETURNS 200"""
     db_ok, db_msg = check_database()
     return jsonify({
         "status": "healthy" if db_ok else "degraded",
@@ -163,12 +142,12 @@ def ping():
 
 @app.route("/keep-alive", methods=["GET"])
 def keep_alive():
-    """🔥 Keep Render awake - UptimeRobot ke liye"""
+    """🔥 Keep Render awake - No UptimeRobot needed!"""
     return jsonify({
         "status": "awake",
         "timestamp": datetime.utcnow().isoformat(),
         "uptime_seconds": get_uptime(),
-        "message": "Service is running, captcha bot active"
+        "message": "Service is running"
     }), 200
 
 @app.route("/status")
@@ -188,14 +167,6 @@ def status():
         total_messages = 0
         total_blogs = 0
     
-    captcha_status = "not_initialized"
-    try:
-        manager = get_captcha_manager_safe()
-        if manager:
-            captcha_status = "running"
-    except:
-        captcha_status = "error"
-    
     return jsonify({
         "status": "ok" if db_ok else "error",
         "timestamp": datetime.utcnow().isoformat(),
@@ -207,8 +178,7 @@ def status():
             "total_blogs": total_blogs,
             "database_size": get_database_size()
         },
-        "backend_url": BACKEND_URL,
-        "captcha_bot": captcha_status
+        "backend_url": BACKEND_URL
     })
 
 @app.route("/campaigns")
@@ -255,7 +225,7 @@ def command():
         intent = detect_intent(query)
         response = generate_response(intent, query, [], [], campaign_id)
         
-        # 🔥 FIXED: Batch write
+        # 🔥 Batch write
         save_messages_batch(campaign_id, query, response, is_ques, now)
         create_campaign(campaign_id, query[:50], now, 2, is_ques, query[:100])
         
@@ -263,7 +233,7 @@ def command():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ================= 🔥 FIXED CHAT ROUTE =================
+# ================= 🔥 CUSTOMIZED CHAT ROUTE =================
 @app.route("/chat/<campaign_id>", methods=["POST"])
 def chat(campaign_id):
     try:
@@ -354,209 +324,6 @@ def blog(slug):
         return "<h1>Blog not found</h1>", 404
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>", 500
-
-
-# ================= CAPTCHA BOT ROUTES =================
-
-@app.route("/api/captcha/status", methods=["GET"])
-def captcha_status():
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        status = manager.get_all_stats()
-        summary = manager.get_summary()
-        
-        return jsonify({
-            "success": True,
-            "status": status,
-            "summary": summary,
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/summary", methods=["GET"])
-def captcha_summary():
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        summary = manager.get_summary()
-        
-        return jsonify({
-            "success": True,
-            "total_bots": summary.get("total_bots", 0),
-            "active_bots": summary.get("active_bots", 0),
-            "total_solved": summary.get("total_solved", 0),
-            "total_errors": summary.get("total_errors", 0),
-            "earning_usd": summary.get("earning_approx_usd", 0),
-            "earning_inr": summary.get("earning_approx_inr", 0),
-            "uptime_hours": summary.get("uptime_hours", 0),
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/bot/<int:bot_id>", methods=["GET"])
-def captcha_bot_detail(bot_id):
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        bot_info = manager.get_bot_by_id(bot_id)
-        
-        if not bot_info:
-            return jsonify({
-                "success": False,
-                "error": f"Bot {bot_id} not found"
-            }), 404
-        
-        return jsonify({
-            "success": True,
-            "bot_id": bot_id,
-            "solved_count": bot_info.get("solved_count", 0),
-            "error_count": bot_info.get("error_count", 0),
-            "is_active": bot_info.get("is_active", False),
-            "last_solve": bot_info.get("last_solve"),
-            "earning_usd": bot_info.get("earning_usd", 0),
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/reset", methods=["POST"])
-def captcha_reset():
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        manager.reset_all_stats()
-        
-        return jsonify({
-            "success": True,
-            "message": "All captcha bot stats reset successfully",
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/restart", methods=["POST"])
-def captcha_restart():
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        manager.stop_all()
-        time.sleep(1)
-        manager.start_all()
-        
-        return jsonify({
-            "success": True,
-            "message": "All captcha bots restarted successfully",
-            "timestamp": datetime.utcnow().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/solve", methods=["POST"])
-def captcha_solve():
-    try:
-        data = request.json or {}
-        image_base64 = data.get("image")
-        
-        if not image_base64:
-            return jsonify({
-                "success": False,
-                "error": "No image provided"
-            }), 400
-        
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        solution = manager.solve_captcha(image_base64)
-        
-        if solution:
-            return jsonify({
-                "success": True,
-                "solution": solution,
-                "timestamp": datetime.utcnow().isoformat()
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": "Could not solve captcha (timeout or error)"
-            }), 500
-            
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-@app.route("/api/captcha/solve-auto", methods=["POST"])
-def captcha_solve_auto():
-    try:
-        manager = get_captcha_manager_safe()
-        if not manager:
-            return jsonify({
-                "success": False,
-                "error": "Captcha bot system not initialized"
-            }), 503
-        
-        summary = manager.get_summary()
-        
-        return jsonify({
-            "success": True,
-            "message": "Bot is active and solving captchas",
-            "triggered_by": "pipedream",
-            "timestamp": datetime.utcnow().isoformat(),
-            "stats": summary
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
 
 
 # ================= HEALTH SERVICE ROUTES =================
