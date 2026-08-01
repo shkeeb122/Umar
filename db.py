@@ -1,10 +1,9 @@
-# db.py - COMPLETE WORKING VERSION WITH MAP
+# db.py - COMPLETE WORKING VERSION (BACKUP REMOVED)
 # ====================================================================
 # 📁 FILE: db.py
 # 🎯 ROLE: MEMORY - Saara data store karta hai
 # 🔗 USED BY: app.py, ai_service.py, blog_service.py
 # 📊 TOTAL TABLES: 6
-# 📋 TOTAL COLUMNS: 42
 # ====================================================================
 
 import sqlite3
@@ -12,15 +11,14 @@ from datetime import datetime
 import uuid
 import os
 
-# ================= ADDED LINE 1 =================
-# 🔥 GITHUB BACKUP SYSTEM IMPORT
-from db_backup import auto_backup_check, restore_from_github
+# ✅ BACKUP IMPORT REMOVED
+# from db_backup import auto_backup_check, restore_from_github  # REMOVED
 
 conn = None
 cursor = None
 
 # ====================================================================
-# 📊 DATABASE MAP - Complete documentation
+# DATABASE MAP
 # ====================================================================
 
 DATABASE_MAP = {
@@ -105,20 +103,6 @@ DATABASE_MAP = {
             }
         }
     }
-}
-
-# ====================================================================
-# SYSTEM CONFIGURATION
-# ====================================================================
-
-DB_VERSION = "5.0"
-
-VERSION_HISTORY = {
-    "1.0": {"description": "Basic chat system"},
-    "2.0": {"description": "Soft delete, message counting"},
-    "3.0": {"description": "Reading time and tags"},
-    "4.0": {"description": "Enhanced blog system"},
-    "5.0": {"description": "AI generation history, recycle bin"}
 }
 
 # ====================================================================
@@ -211,13 +195,25 @@ def init_db():
     except Exception as e:
         print(f"   ⚠️ Version tracking: {e}")
     
-    # ================= ADDED LINE 2 =================
-    # 🔥 RESTORE FROM GITHUB BACKUP (Data safe!)
-    print("\n🔄 Checking GitHub backup...")
-    restore_from_github()
+    # ✅ BACKUP RESTORE REMOVED
+    # restore_from_github()  # REMOVED
     
     conn.commit()
-    print("\n✅ DATABASE INITIALIZATION COMPLETE! (Old data SAFE, New features ADDED)")
+    print("\n✅ DATABASE INITIALIZATION COMPLETE!")
+
+# ====================================================================
+# SYSTEM CONFIGURATION
+# ====================================================================
+
+DB_VERSION = "5.0"
+
+VERSION_HISTORY = {
+    "1.0": {"description": "Basic chat system"},
+    "2.0": {"description": "Soft delete, message counting"},
+    "3.0": {"description": "Reading time and tags"},
+    "4.0": {"description": "Enhanced blog system"},
+    "5.0": {"description": "AI generation history, recycle bin"}
+}
 
 # ====================================================================
 # DATABASE INFO FUNCTIONS
@@ -384,9 +380,8 @@ def save_message(msg_id, campaign_id, role, content, is_question, timestamp):
                       (msg_id, campaign_id, role, content, is_question, timestamp))
         commit()
         
-        # ================= ADDED LINE 3 =================
-        # 🔥 AUTO BACKUP CHECK (Background mein backup hoga, zero delay!)
-        auto_backup_check()
+        # ✅ AUTO BACKUP CHECK REMOVED
+        # auto_backup_check()  # REMOVED
         
         return True
     except Exception as e:
