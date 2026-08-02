@@ -141,50 +141,48 @@ INTENT_REGISTRY = {
     },
     
     # ============================================================
-    # ⬜ DISABLED INTENTS - Enable karne ke liye comment hatao
+    # 🆕 NEW INTENTS - Ye ab active hain
     # ============================================================
-    # 🔥 Agar koi intent enable karna hai toh comment hata do
-    # 🔥 Agar koi intent disable karna hai toh comment kar do
     
-    # "image": {
-    #     "keywords": ["image", "photo", "picture", "dekho", "image samjhao", "photo dekho"],
-    #     "handler": "handle_image",
-    #     "priority": 1,
-    #     "description": "Image understanding",
-    #     "example": "Is image mein kya hai?"
-    # },
+    "image": {
+        "keywords": ["image", "photo", "picture", "dekho", "image samjhao", "photo dekho", "ye kya hai"],
+        "handler": "handle_image",
+        "priority": 1,
+        "description": "Image understanding - image ko describe karo",
+        "example": "Is image mein kya hai? https://example.com/photo.jpg"
+    },
     
-    # "search": {
-    #     "keywords": ["search", "google", "pata karo", "khojo", "find", "search karo"],
-    #     "handler": "handle_search",
-    #     "priority": 1,
-    #     "description": "Web search",
-    #     "example": "Google search karo AI ke baare mein"
-    # },
+    "search": {
+        "keywords": ["search", "google", "pata karo", "khojo", "find", "search karo", "google search"],
+        "handler": "handle_search",
+        "priority": 1,
+        "description": "Web search - Google search karo",
+        "example": "Google search karo AI ke baare mein"
+    },
     
-    # "translate": {
-    #     "keywords": ["translate", "anuvad", "convert language", "translate karo", "bhasha badlo"],
-    #     "handler": "handle_translate",
-    #     "priority": 1,
-    #     "description": "Language translation",
-    #     "example": "Translate hello to Hindi"
-    # },
+    "translate": {
+        "keywords": ["translate", "anuvad", "convert language", "translate karo", "bhasha badlo", "language change"],
+        "handler": "handle_translate",
+        "priority": 1,
+        "description": "Language translation - text translate karo",
+        "example": "Translate hello to Hindi"
+    },
     
-    # "code": {
-    #     "keywords": ["code", "program", "function", "code likho", "program banao", "script"],
-    #     "handler": "handle_code",
-    #     "priority": 1,
-    #     "description": "Code generation",
-    #     "example": "Python code likho calculator ke liye"
-    # },
+    "code": {
+        "keywords": ["code", "program", "function", "code likho", "program banao", "script", "programming"],
+        "handler": "handle_code",
+        "priority": 1,
+        "description": "Code generation - code likho",
+        "example": "Python code likho calculator ke liye"
+    },
     
-    # "summarize": {
-    #     "keywords": ["summary", "summarize", "sankshep", "short", "shorten"],
-    #     "handler": "handle_summarize",
-    #     "priority": 1,
-    #     "description": "Summarize text",
-    #     "example": "Is article ka summary do"
-    # },
+    "summarize": {
+        "keywords": ["summary", "summarize", "sankshep", "short", "shorten", "short summary", "summarise"],
+        "handler": "handle_summarize",
+        "priority": 1,
+        "description": "Summarize text - text ka summary do",
+        "example": "Is article ka summary do"
+    },
 }
 
 
@@ -278,6 +276,121 @@ def handle_blog(message, history, all_history, campaign_id=None, **kwargs):
     system = f"You are an expert writer. Create a detailed, engaging blog post about: {topic}"
     messages = [{"role": "system", "content": system}]
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
+
+
+# ============================================================
+# 🆕 NEW HANDLERS - Naye features ke liye
+# ============================================================
+
+def handle_image(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Image Understanding
+    📝 DESCRIPTION: Image ko samjho aur describe karo
+    
+    Parameters:
+        message (str): User's message with image URL
+    
+    Returns:
+        str: Image description
+    """
+    # Image URL extract karo
+    image_url = re.search(r'(https?://[^\s]+\.(jpg|jpeg|png|gif|webp))', message)
+    
+    if not image_url:
+        return "Please provide an image URL. Example: image samjhao https://example.com/photo.jpg"
+    
+    # Content array with text + image
+    content = [
+        {"type": "text", "text": "Describe this image in detail."},
+        {"type": "image_url", "image_url": image_url.group(0)}
+    ]
+    
+    messages = [{"role": "user", "content": content}]
+    return ai_chat(messages, temperature=0.7, max_tokens=500)
+
+
+def handle_search(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Web Search
+    📝 DESCRIPTION: Google search karo
+    
+    Parameters:
+        message (str): User's search query
+    
+    Returns:
+        str: Search results summary
+    """
+    query = re.sub(r'(search|google|pata karo|khojo|find|search karo|google search)', '', message, flags=re.IGNORECASE).strip()
+    
+    if not query:
+        return "What would you like to search for?"
+    
+    # 🔥 Search API integration yahan karo
+    # Abhi ke liye placeholder
+    return f"🔍 Searching for: '{query}'\n\n(Search integration coming soon. Add Google Custom Search API or SerpAPI to enable.)"
+
+
+def handle_translate(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Language Translation
+    📝 DESCRIPTION: Text translate karo
+    
+    Parameters:
+        message (str): User's message with text to translate
+    
+    Returns:
+        str: Translated text
+    """
+    text = re.sub(r'(translate|anuvad|convert language|translate karo|bhasha badlo|language change)', '', message, flags=re.IGNORECASE).strip()
+    
+    if not text:
+        return "क्या translate करना है? / What would you like to translate?"
+    
+    # 🔥 Translation API integration yahan karo
+    # Abhi ke liye placeholder
+    return f"🔤 Translation: '{text}'\n\n(Translation integration coming soon. Add Google Translate API or similar.)"
+
+
+def handle_code(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Code Generation
+    📝 DESCRIPTION: Code likho
+    
+    Parameters:
+        message (str): User's code request
+    
+    Returns:
+        str: Generated code
+    """
+    prompt = re.sub(r'(code|program|function|script|code likho|program banao|programming)', '', message, flags=re.IGNORECASE).strip()
+    
+    if not prompt:
+        return "What code would you like me to write? Example: Python code likho calculator ke liye"
+    
+    system = f"You are an expert programmer. Write clean, efficient, well-commented code for: {prompt}"
+    messages = [{"role": "system", "content": system}]
+    return ai_chat(messages, temperature=0.5, max_tokens=1000)
+
+
+def handle_summarize(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Text Summarization
+    📝 DESCRIPTION: Kisi bhi text ka summary do
+    
+    Parameters:
+        message (str): User's text to summarize
+    
+    Returns:
+        str: Summary
+    """
+    text = re.sub(r'(summary|summarize|sankshep|short|shorten|short summary|summarise)', '', message, flags=re.IGNORECASE).strip()
+    
+    if not text:
+        return "What would you like me to summarize? Example: Is article ka summary do: [text]"
+    
+    system = f"Summarize the following text concisely and clearly:\n\n{text}"
+    messages = [{"role": "user", "content": system}]
+    return ai_chat(messages, temperature=0.5, max_tokens=300)
 
 
 # ============================================================
