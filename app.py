@@ -32,7 +32,7 @@ import sqlite3
 from config import BACKEND_URL
 from db import *
 from helpers import *
-from ai_service import detect_intent, generate_response
+from ai_service import detect_intent, generate_response, ai_chat
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 2: APP SETUP (🔒 NEVER CHANGE!)
@@ -142,7 +142,7 @@ def home():
     return jsonify({
         "status": "AI Ultimate Pro",
         "version": "7.0",
-        "features": ["Chat", "Blogs", "History", "Batch Writes"]
+        "features": ["Chat", "Blogs", "History", "Batch Writes", "Image Understanding"]
     })
 
 
@@ -395,6 +395,59 @@ def blogs():
     try:
         blogs = get_all_blogs(20)
         return jsonify({"blogs": blogs})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
+# 📌 ROUTE: Chat with Image (NEW)
+# ============================================================
+
+@app.route("/chat/image", methods=["POST"])
+def chat_image():
+    """
+    📌 ROUTE: Chat with Image
+    📝 PURPOSE: Image understanding ke liye - Documentation ke hisaab se
+    
+    Request Body:
+        {
+            "text": "Is image mein kya hai?",
+            "image_url": "https://example.com/photo.jpg"
+        }
+    
+    Returns:
+        {
+            "success": True,
+            "response": "Image description..."
+        }
+    
+    🔧 HOW IT WORKS:
+        1. User text + image URL bhejta hai
+        2. AI image ko analyze karta hai
+        3. Description return karta hai
+    """
+    try:
+        data = request.json or {}
+        text = data.get("text", "Describe this image in detail.")
+        image_url = data.get("image_url")
+        
+        if not image_url:
+            return jsonify({"error": "Image URL required"}), 400
+        
+        # Documentation ke hisaab se content array
+        content = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": image_url}
+        ]
+        messages = [{"role": "user", "content": content}]
+        
+        # AI call
+        response = ai_chat(messages, temperature=0.7, max_tokens=500)
+        
+        return jsonify({
+            "success": True,
+            "response": response
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
