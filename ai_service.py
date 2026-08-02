@@ -1,34 +1,56 @@
-# ai_service.py - MISTRAL API DOCUMENTATION KE HISAAB SE
-# ====================================================================
-# 📁 FILE: ai_service.py
-# 🎯 ROLE: BRAIN - Mistral AI Chat API implementation
-# 📚 DOCUMENTATION: POST /v1/chat/completions
-# 📋 PARAMETERS: model, messages, temperature, max_tokens, top_p
-# ⚡ TIMEOUT: 15 seconds (Recommended)
-# ====================================================================
+# ====================================================================================================
+# 📁 FILE: ai_service.py - SMART SYSTEM DESIGN
+# 🎯 ROLE: BRAIN - Intent Detection + Response Generation
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# 📋 ARCHITECTURE: Modular + Plugin Pattern
+# 🔧 UPDATE GUIDE - HOW TO MODIFY:
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+#   🔵 Add New Intent: LAYER 3 mein entry + LAYER 4 mein handler function
+#   🔵 Remove Intent: LAYER 3 se line hata do (bas itna kaafi hai)
+#   🔵 Update Handler: LAYER 4 mein function edit karo
+#   🔒 NEVER CHANGE: LAYER 2 (ai_chat) - Core API call
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# ⚠️ RULES:
+#   1. Core function (ai_chat) kabhi change mat karo
+#   2. Intent Registry + Handlers mein sab changes allowed
+#   3. Naya intent add karna hai toh dono jagah karo (Registry + Handler)
+#   4. Intent remove karna hai toh sirf Registry se hata do
+# ====================================================================================================
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 1: IMPORTS (✅ Rarely Change - Sirf naya module add karne par)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 import requests
 import time
+import re
 from datetime import datetime
 
 from config import MISTRAL_URL, HEADERS, MODEL_NAME
-from db import get_recent_history, count_questions
+from db import get_recent_history, get_all_history, count_questions
 from helpers import is_question, format_response, extract_topic
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 2: CORE AI (🔒 LOCKED - NEVER CHANGE!)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# ⚠️ WARNING: Ye function system ka heart hai. Kabhi change mat karo!
+# ⚠️ Agar change karna hai toh bahut soch samajh kar karo, aur backup rakho.
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def ai_chat(messages, temperature=0.7, max_tokens=500):
     """
-    Mistral AI Chat Completion API
-    Documentation: POST /v1/chat/completions
+    🔒 CORE FUNCTION - DO NOT CHANGE
+    Mistral AI Chat Completion API - POST /v1/chat/completions
     
     Parameters:
-        model (str): Model name (mistral-small-latest)
-        messages (list): List of message objects with role and content
-        temperature (float): 0.0 to 1.0 (0.7 recommended)
-        max_tokens (int): Max tokens in response (500 recommended)
-        top_p (float): Nucleus sampling (0.95 recommended)
+        messages (list): [{"role": "user", "content": "Hello"}]
+        temperature (float): 0.0 to 1.0 (creativity)
+        max_tokens (int): Max response length
     
     Returns:
-        str: AI response content
+        str: AI response
+    
+    ⚠️ CHANGING THIS WILL BREAK THE ENTIRE SYSTEM!
     """
     try:
         payload = {
@@ -40,16 +62,12 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
         }
         
         start_time = time.time()
-        
-        # API Call with 15 second timeout
         r = requests.post(MISTRAL_URL, headers=HEADERS, json=payload, timeout=15)
         
         if r.status_code != 200:
             return "⚠️ Server busy. Please try again."
         
         data = r.json()
-        
-        # Response format: choices[0].message.content
         response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         
         print(f"✅ AI Response time: {time.time() - start_time:.2f}s")
@@ -61,76 +79,357 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
         print(f"❌ AI Error: {e}")
         return "❌ Error occurred. Please try again."
 
-def detect_intent(text, history=None):
-    """Basic intent detection"""
-    t = text.lower()
-    
-    # Count questions
-    if any(w in t for w in ["kitne sawal", "total sawal", "how many question"]):
-        return "count_questions"
-    
-    # Blog
-    if any(w in t for w in ["blog", "article", "post", "write about", "likh", "blog banao"]):
-        return "blog"
-    
-    # Follow up
-    if any(w in t for w in ["aur batao", "tell more", "elaborate", "aur details"]):
-        return "follow_up"
-    
-    # Recall
-    if any(w in t for w in ["pehle", "pichle", "kal", "aaj", "bhool", "yaad"]):
-        return "recall"
-    
-    return "chat"
 
-def generate_blog(topic):
-    """Generate blog content using AI"""
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 3: INTENT REGISTRY (🔵 FLEXIBLE - Add/Remove Here)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 📋 HOW TO ADD NEW INTENT:
+#   Step 1: Neechay INTENT_REGISTRY mein entry daalo
+#   Step 2: LAYER 4 mein handler function likho
+#   Step 3: Deploy karo!
+#
+# 📋 HOW TO REMOVE INTENT:
+#   Step 1: INTENT_REGISTRY se line hata do
+#   Step 2: Baaki sab apne aap kaam karega
+#
+# ⚠️ Note: "keywords" mein user ke common words daalo (Hindi + English)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+INTENT_REGISTRY = {
+    # ============================================================
+    # ✅ ACTIVE INTENTS - Ye sab kaam kar rahe hain
+    # ============================================================
+    
+    "chat": {
+        "keywords": [],  # Empty = default intent
+        "handler": "handle_chat",
+        "priority": 0,
+        "description": "Default chat - user ko normal response",
+        "example": "Hello, kese ho?"
+    },
+    
+    "count_questions": {
+        "keywords": ["kitne sawal", "total sawal", "how many question", "sawal kitne", "questions count"],
+        "handler": "handle_count_questions",
+        "priority": 1,
+        "description": "Count total questions asked",
+        "example": "Maine kitne sawal kiye?"
+    },
+    
+    "recall": {
+        "keywords": ["pehle kya hua", "pichle", "previous", "yaad", "bhool", "kal", "aaj", "purana"],
+        "handler": "handle_recall",
+        "priority": 1,
+        "description": "Recall chat history",
+        "example": "Pehle kya hua tha?"
+    },
+    
+    "follow_up": {
+        "keywords": ["aur batao", "tell more", "elaborate", "aur details", "aur jaankari", "further"],
+        "handler": "handle_follow_up",
+        "priority": 1,
+        "description": "Follow-up response",
+        "example": "Aur batao"
+    },
+    
+    "blog": {
+        "keywords": ["blog", "article", "post", "likh", "blog banao", "article likho", "post likho"],
+        "handler": "handle_blog",
+        "priority": 1,
+        "description": "Generate blog post",
+        "example": "Blog banao car ke baare mein"
+    },
+    
+    # ============================================================
+    # ⬜ DISABLED INTENTS - Enable karne ke liye comment hatao
+    # ============================================================
+    # 🔥 Agar koi intent enable karna hai toh comment hata do
+    # 🔥 Agar koi intent disable karna hai toh comment kar do
+    
+    # "image": {
+    #     "keywords": ["image", "photo", "picture", "dekho", "image samjhao", "photo dekho"],
+    #     "handler": "handle_image",
+    #     "priority": 1,
+    #     "description": "Image understanding",
+    #     "example": "Is image mein kya hai?"
+    # },
+    
+    # "search": {
+    #     "keywords": ["search", "google", "pata karo", "khojo", "find", "search karo"],
+    #     "handler": "handle_search",
+    #     "priority": 1,
+    #     "description": "Web search",
+    #     "example": "Google search karo AI ke baare mein"
+    # },
+    
+    # "translate": {
+    #     "keywords": ["translate", "anuvad", "convert language", "translate karo", "bhasha badlo"],
+    #     "handler": "handle_translate",
+    #     "priority": 1,
+    #     "description": "Language translation",
+    #     "example": "Translate hello to Hindi"
+    # },
+    
+    # "code": {
+    #     "keywords": ["code", "program", "function", "code likho", "program banao", "script"],
+    #     "handler": "handle_code",
+    #     "priority": 1,
+    #     "description": "Code generation",
+    #     "example": "Python code likho calculator ke liye"
+    # },
+    
+    # "summarize": {
+    #     "keywords": ["summary", "summarize", "sankshep", "short", "shorten"],
+    #     "handler": "handle_summarize",
+    #     "priority": 1,
+    #     "description": "Summarize text",
+    #     "example": "Is article ka summary do"
+    # },
+}
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 4: INTENT HANDLERS (🔵 FLEXIBLE - Add/Remove Here)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 📋 HOW TO ADD NEW HANDLER:
+#   Step 1: Neechay naya function likho (def handle_xxxxx)
+#   Step 2: INTENT_REGISTRY mein entry daalo
+#
+# 📋 HOW TO REMOVE HANDLER:
+#   Step 1: INTENT_REGISTRY se entry hata do
+#   Step 2: Function ko comment kar do (optional)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def handle_chat(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    Default chat handler - Jab koi specific intent match na ho
+    
+    Parameters:
+        message (str): User's message
+        history (list): Chat history
+        campaign_id (str): Current chat ID
+    
+    Returns:
+        str: AI response
+    """
+    if not history:
+        history = []
+    
+    current_date = datetime.now().strftime("%d %B %Y")
+    
+    messages = [
+        {"role": "system", "content": f"You are a helpful AI assistant. Today's date is {current_date}. Respond in Hindi or English."}
+    ]
+    messages.extend(history[-10:])
+    messages.append({"role": "user", "content": message})
+    
+    return ai_chat(messages, temperature=0.7, max_tokens=500)
+
+
+def handle_count_questions(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    Count total questions handler
+    
+    Returns:
+        str: Total questions count
+    """
+    count = count_questions(campaign_id)
+    return f"📊 Total questions: {count}"
+
+
+def handle_recall(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    Recall chat history handler
+    
+    Returns:
+        str: Last 20 messages
+    """
+    if not campaign_id:
+        return "No chat history found. Start a new chat first!"
+    
+    recent = get_recent_history(campaign_id, 20)
+    if not recent:
+        return "I don't remember anything."
+    
+    return "📜 Previous:\n" + "\n".join([f"• {q['content']}" for q in recent])
+
+
+def handle_follow_up(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    Follow-up handler
+    
+    Returns:
+        str: Follow-up response
+    """
+    return "Tell me more about what you'd like to know."
+
+
+def handle_blog(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    Blog generation handler
+    
+    Returns:
+        str: Generated blog post
+    """
+    topic = extract_topic(message)
+    if not topic:
+        return "📝 What topic for blog?"
+    
     system = f"You are an expert writer. Create a detailed, engaging blog post about: {topic}"
     messages = [{"role": "system", "content": system}]
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
-def generate_response(intent, message, history, all_history, campaign_id=None):
-    """Generate response based on intent"""
-    
-    if intent == "count_questions":
-        return f"📊 Total questions: {count_questions(campaign_id)}"
-    
-    elif intent == "blog":
-        topic = extract_topic(message)
-        if not topic:
-            return "📝 What topic for blog?"
-        return generate_blog(topic)
-    
-    elif intent == "follow_up":
-        return "Tell me more about what you'd like to know."
-    
-    elif intent == "recall":
-        recent = get_recent_history(campaign_id, 5)
-        if not recent:
-            return "I don't remember anything."
-        return "📜 Previous:\n" + "\n".join([f"• {q['content']}" for q in recent])
-    
-    else:
-        # Default chat
-        if not history:
-            history = []
-        
-        # System prompt with current date
-        current_date = datetime.now().strftime("%d %B %Y")
-        
-        messages = [
-            {"role": "system", "content": f"You are a helpful AI assistant. Today's date is {current_date}. Respond in Hindi or English."}
-        ]
-        messages.extend(history[-10:])
-        messages.append({"role": "user", "content": message})
-        
-        return ai_chat(messages, temperature=0.7, max_tokens=500)
 
-print("=" * 60)
-print("📁 AI SERVICE LOADED - Mistral API Ready")
-print("=" * 60)
-print("✅ Model: mistral-small-latest")
-print("✅ Timeout: 15 seconds")
-print("✅ Temperature: 0.7")
-print("✅ Max Tokens: 500")
-print("=" * 60)
+# ============================================================
+# 🔥 NEW HANDLER TEMPLATE - Naya handler add karne ke liye
+# ============================================================
+# 📋 Copy-paste this template to add new handler:
+# ============================================================
+
+"""
+def handle_new_feature(message, history, all_history, campaign_id=None, **kwargs):
+    '''
+    📌 FEATURE: [Feature Name]
+    📝 DESCRIPTION: [What this feature does]
+    
+    Parameters:
+        message (str): User's message
+        history (list): Chat history
+        all_history (list): All messages
+        campaign_id (str): Current chat ID
+    
+    Returns:
+        str: Response to user
+    
+    🔧 HOW TO USE:
+        1. INTENT_REGISTRY mein entry daalo
+        2. Ye function add karo
+        3. Deploy karo
+    '''
+    # 📝 Your logic here
+    return "Response from new feature"
+"""
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 5: ROUTER (🟡 RARELY CHANGE - Sirf naya feature add karne par)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def detect_intent(text, history=None):
+    """
+    Detect intent from user text using INTENT_REGISTRY
+    
+    Parameters:
+        text (str): User's message
+        history (list): Chat history (optional)
+    
+    Returns:
+        str: Intent name
+    """
+    if not text:
+        return "chat"
+    
+    text_lower = text.lower()
+    
+    # Check all intents except chat (which has no keywords)
+    for intent_name, config in INTENT_REGISTRY.items():
+        if intent_name == "chat":
+            continue
+        keywords = config.get("keywords", [])
+        for keyword in keywords:
+            if keyword in text_lower:
+                return intent_name
+    
+    # Default
+    return "chat"
+
+
+def get_handler(intent_name):
+    """
+    Get handler function for given intent
+    
+    Parameters:
+        intent_name (str): Intent name
+    
+    Returns:
+        function: Handler function or None
+    """
+    if intent_name in INTENT_REGISTRY:
+        handler_name = INTENT_REGISTRY[intent_name].get("handler")
+        if handler_name:
+            return globals().get(handler_name)
+    return None
+
+
+def generate_response(intent, message, history, all_history, campaign_id=None):
+    """
+    Main response generator - Uses intent registry to route requests
+    
+    Parameters:
+        intent (str): Detected intent
+        message (str): User's message
+        history (list): Chat history
+        all_history (list): All messages
+        campaign_id (str): Current chat ID
+    
+    Returns:
+        str: Response to user
+    """
+    # Try to get handler from registry
+    handler = get_handler(intent)
+    
+    if handler:
+        try:
+            return handler(
+                message=message,
+                history=history,
+                all_history=all_history,
+                campaign_id=campaign_id
+            )
+        except Exception as e:
+            print(f"❌ Handler error: {e}")
+            return f"⚠️ Error processing request: {str(e)}"
+    
+    # Fallback to default chat
+    return handle_chat(message, history, all_history, campaign_id)
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# LAYER 6: INIT (🔒 NEVER CHANGE)
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+print("=" * 70)
+print("🧠 AI SERVICE LOADED - SMART INTENT REGISTRY ACTIVE")
+print("=" * 70)
+print("📋 Registered Intents:")
+for name, config in INTENT_REGISTRY.items():
+    status = "✅" if config.get("keywords") else "📌"
+    print(f"  {status} {name}: {config['description']}")
+    print(f"      → {config.get('example', 'No example')}")
+print("=" * 70)
+print("🔵 Add/Remove Intents: INTENT_REGISTRY + HANDLERS")
+print("🔒 Core (ai_chat): NEVER CHANGE")
+print("=" * 70)
+
+
+# ====================================================================================================
+# 📋 QUICK REFERENCE CARD - ai_service.py
+# ====================================================================================================
+#                                                                             
+#  🔵 ADD NEW INTENT:                                                         
+#    File: ai_service.py                                                      
+#    Step 1: LAYER 3 (INTENT_REGISTRY) → Entry add karo                      
+#    Step 2: LAYER 4 (HANDLERS) → Handler function add karo                  
+#                                                                             
+#  🔵 REMOVE INTENT:                                                          
+#    File: ai_service.py                                                      
+#    Step 1: LAYER 3 (INTENT_REGISTRY) → Line hata do                        
+#                                                                             
+#  🔵 UPDATE HANDLER:                                                         
+#    File: ai_service.py                                                      
+#    Step 1: LAYER 4 (HANDLERS) → Function edit karo                         
+#                                                                             
+#  🔒 LOCKED (NEVER CHANGE):                                                  
+#    • ai_chat() - Core API function                                          
+#                                                                             
+# ====================================================================================================
