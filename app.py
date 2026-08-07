@@ -28,6 +28,7 @@ from datetime import datetime
 import time
 import os
 import sqlite3
+import threading
 
 from config import BACKEND_URL
 from db import *
@@ -45,6 +46,11 @@ CORS(app)
 init_db()
 cursor = get_cursor()
 start_time = time.time()
+
+# Global orchestrator instance
+_orchestrator = None
+_orchestrator_thread = None
+_orchestrator_running = False
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 3: CONTROLLERS / HELPERS (🟡 CHANGE ALLOWED)
@@ -107,6 +113,38 @@ def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
         raise
     finally:
         conn.close()
+
+
+def get_orchestrator():
+    """Get or create orchestrator instance"""
+    global _orchestrator
+    if _orchestrator is None:
+        from main import MainOrchestrator
+        _orchestrator = MainOrchestrator()
+    return _orchestrator
+
+
+def run_orchestrator_async():
+    """Run orchestrator in background thread"""
+    global _orchestrator_running, _orchestrator_thread
+    if _orchestrator_running:
+        return
+    
+    _orchestrator_running = True
+    orchestrator = get_orchestrator()
+    
+    def run():
+        try:
+            orchestrator.start_automation()
+        except Exception as e:
+            print(f"❌ Orchestrator error: {e}")
+        finally:
+            global _orchestrator_running
+            _orchestrator_running = False
+    
+    _orchestrator_thread = threading.Thread(target=run)
+    _orchestrator_thread.daemon = True
+    _orchestrator_thread.start()
 
 
 # ============================================================
@@ -450,6 +488,207 @@ def chat_image():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
+# 🆕 NEW ROUTES - RapidWorkers Automation
+# ============================================================
+
+@app.route("/automation/start", methods=["POST"])
+def automation_start():
+    """
+    📌 ROUTE: Start Automation
+    📝 PURPOSE: RapidWorkers automation start karega
+    
+    Request Body:
+        {
+            "command": "start"  # Optional
+        }
+    
+    Returns:
+        {
+            "success": True,
+            "message": "Automation started!",
+            "status": "running"
+        }
+    
+    🔧 HOW IT WORKS:
+        1. Orchestrator instance get karega
+        2. Background thread mein start karega
+        3. Status return karega
+    """
+    try:
+        global _orchestrator_running
+        
+        if _orchestrator_running:
+            return jsonify({
+                "success": False,
+                "message": "⚠️ Automation already running!",
+                "status": "running"
+            }), 400
+        
+        # Start orchestrator
+        run_orchestrator_async()
+        
+        return jsonify({
+            "success": True,
+            "message": "🚀 Automation started successfully!",
+            "status": "starting",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/automation/stop", methods=["POST"])
+def automation_stop():
+    """
+    📌 ROUTE: Stop Automation
+    📝 PURPOSE: RapidWorkers automation stop karega
+    
+    Request Body:
+        {
+            "command": "stop"  # Optional
+        }
+    
+    Returns:
+        {
+            "success": True,
+            "message": "Automation stopped!",
+            "status": "stopped"
+        }
+    
+    🔧 HOW IT WORKS:
+        1. Orchestrator instance get karega
+        2. Stop command bhejega
+        3. Status return karega
+    """
+    try:
+        global _orchestrator_running
+        
+        orchestrator = get_orchestrator()
+        result = orchestrator.stop_automation()
+        
+        _orchestrator_running = False
+        
+        return jsonify({
+            "success": True,
+            "message": result,
+            "status": "stopped",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/automation/status", methods=["GET"])
+def automation_status():
+    """
+    📌 ROUTE: Get Automation Status
+    📝 PURPOSE: Current automation status bataega
+    
+    Returns:
+        {
+            "success": True,
+            "status": "running" | "stopped" | "paused",
+            "tasks_completed": 10,
+            "total_earned": "$1.50",
+            "uptime": 3600
+        }
+    
+    🔧 HOW IT WORKS:
+        1. Orchestrator instance get karega
+        2. Status fetch karega
+        3. Return karega
+    """
+    try:
+        orchestrator = get_orchestrator()
+        status = orchestrator.get_status()
+        
+        return jsonify({
+            "success": True,
+            "status": status
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/automation/command", methods=["POST"])
+def automation_command():
+    """
+    📌 ROUTE: Send Automation Command
+    📝 PURPOSE: Chat commands handle karega
+    
+    Request Body:
+        {
+            "command": "start" | "stop" | "status" | "pause" | "resume"
+        }
+    
+    Returns:
+        {
+            "success": True,
+            "message": "Command executed!",
+            "status": {}
+        }
+    
+    🔧 HOW IT WORKS:
+        1. Command parse karega
+        2. Action execute karega
+        3. Response return karega
+    """
+    try:
+        data = request.json or {}
+        command = data.get("command", "").lower().strip()
+        
+        if not command:
+            return jsonify({
+                "success": False,
+                "error": "Command required"
+            }), 400
+        
+        orchestrator = get_orchestrator()
+        result = ""
+        
+        if command == "start":
+            return automation_start()
+        elif command == "stop":
+            return automation_stop()
+        elif command == "status":
+            return automation_status()
+        elif command == "pause":
+            result = orchestrator.pause_automation()
+        elif command == "resume":
+            result = orchestrator.resume_automation()
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"Unknown command: {command}. Available: start, stop, status, pause, resume"
+            }), 400
+        
+        return jsonify({
+            "success": True,
+            "message": result,
+            "status": orchestrator.get_status(),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
