@@ -97,7 +97,7 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
 
 INTENT_REGISTRY = {
     # ============================================================
-    # ✅ ACTIVE INTENTS - Ye sab kaam kar rahe hain
+    # ✅ EXISTING INTENTS - Ye pehle se kaam kar rahe hain
     # ============================================================
     
     "chat": {
@@ -140,10 +140,6 @@ INTENT_REGISTRY = {
         "example": "Blog banao car ke baare mein"
     },
     
-    # ============================================================
-    # 🆕 NEW INTENTS - Ye ab active hain
-    # ============================================================
-    
     "image": {
         "keywords": ["image", "photo", "picture", "dekho", "image samjhao", "photo dekho", "ye kya hai"],
         "handler": "handle_image",
@@ -183,6 +179,74 @@ INTENT_REGISTRY = {
         "description": "Summarize text - text ka summary do",
         "example": "Is article ka summary do"
     },
+    
+    # ============================================================
+    # 🆕 NEW INTENTS - RapidWorkers Automation Ke Liye
+    # ============================================================
+    
+    "reddit_task": {
+        "keywords": ["reddit", "comment", "upvote", "join", "subreddit"],
+        "handler": "handle_reddit_task",
+        "priority": 2,
+        "description": "Reddit Comments, Upvote, Join Subreddit",
+        "example": "Reddit comment karo"
+    },
+    
+    "youtube_task": {
+        "keywords": ["youtube", "video", "like", "subscribe", "watch", "view"],
+        "handler": "handle_youtube_task",
+        "priority": 2,
+        "description": "YouTube Search, Watch, Like, Subscribe",
+        "example": "YouTube video like karo"
+    },
+    
+    "social_task": {
+        "keywords": ["behance", "tiktok", "instagram", "twitter", "like", "save", "comment", "share"],
+        "handler": "handle_social_task",
+        "priority": 2,
+        "description": "Behance, TikTok, Instagram, Twitter Tasks",
+        "example": "Behance task karo"
+    },
+    
+    "review_task": {
+        "keywords": ["review", "gmb", "trustpilot", "google", "5 star", "star"],
+        "handler": "handle_review_task",
+        "priority": 2,
+        "description": "GMB Reviews, Trustpilot Reviews",
+        "example": "Google review karo"
+    },
+    
+    "facebook_task": {
+        "keywords": ["facebook", "fb", "comment", "invite", "group", "follow"],
+        "handler": "handle_facebook_task",
+        "priority": 2,
+        "description": "Facebook Comments, Invite, Follow",
+        "example": "Facebook comment karo"
+    },
+    
+    "report_task": {
+        "keywords": ["report", "fake", "ad", "listing", "scam"],
+        "handler": "handle_report_task",
+        "priority": 2,
+        "description": "Fake Ad Report, Fake Listing Report",
+        "example": "Fake ad report karo"
+    },
+    
+    "form_task": {
+        "keywords": ["form", "fill", "copy", "paste", "survey"],
+        "handler": "handle_form_task",
+        "priority": 2,
+        "description": "Form Filling, Copy-Paste, Survey",
+        "example": "Form bharo"
+    },
+    
+    "signup_task": {
+        "keywords": ["signup", "register", "gmail", "account", "create"],
+        "handler": "handle_signup_task",
+        "priority": 2,
+        "description": "Gmail Signup, Account Create",
+        "example": "Gmail account banao"
+    },
 }
 
 
@@ -198,17 +262,13 @@ INTENT_REGISTRY = {
 #   Step 2: Function ko comment kar do (optional)
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
+# ============================================================
+# EXISTING HANDLERS - Ye pehle se kaam kar rahe hain
+# ============================================================
+
 def handle_chat(message, history, all_history, campaign_id=None, **kwargs):
     """
     Default chat handler - Jab koi specific intent match na ho
-    
-    Parameters:
-        message (str): User's message
-        history (list): Chat history
-        campaign_id (str): Current chat ID
-    
-    Returns:
-        str: AI response
     """
     if not history:
         history = []
@@ -225,23 +285,13 @@ def handle_chat(message, history, all_history, campaign_id=None, **kwargs):
 
 
 def handle_count_questions(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    Count total questions handler
-    
-    Returns:
-        str: Total questions count
-    """
+    """Count total questions handler"""
     count = count_questions(campaign_id)
     return f"📊 Total questions: {count}"
 
 
 def handle_recall(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    Recall chat history handler
-    
-    Returns:
-        str: Last 20 messages
-    """
+    """Recall chat history handler"""
     if not campaign_id:
         return "No chat history found. Start a new chat first!"
     
@@ -253,22 +303,12 @@ def handle_recall(message, history, all_history, campaign_id=None, **kwargs):
 
 
 def handle_follow_up(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    Follow-up handler
-    
-    Returns:
-        str: Follow-up response
-    """
+    """Follow-up handler"""
     return "Tell me more about what you'd like to know."
 
 
 def handle_blog(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    Blog generation handler
-    
-    Returns:
-        str: Generated blog post
-    """
+    """Blog generation handler"""
     topic = extract_topic(message)
     if not topic:
         return "📝 What topic for blog?"
@@ -278,28 +318,13 @@ def handle_blog(message, history, all_history, campaign_id=None, **kwargs):
     return ai_chat(messages, temperature=0.8, max_tokens=2000)
 
 
-# ============================================================
-# 🆕 NEW HANDLERS - Naye features ke liye
-# ============================================================
-
 def handle_image(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    📌 FEATURE: Image Understanding
-    📝 DESCRIPTION: Image ko samjho aur describe karo
-    
-    Parameters:
-        message (str): User's message with image URL
-    
-    Returns:
-        str: Image description
-    """
-    # Image URL extract karo
+    """Image Understanding - image ko describe karo"""
     image_url = re.search(r'(https?://[^\s]+\.(jpg|jpeg|png|gif|webp))', message)
     
     if not image_url:
         return "Please provide an image URL. Example: image samjhao https://example.com/photo.jpg"
     
-    # Content array with text + image
     content = [
         {"type": "text", "text": "Describe this image in detail."},
         {"type": "image_url", "image_url": image_url.group(0)}
@@ -310,58 +335,27 @@ def handle_image(message, history, all_history, campaign_id=None, **kwargs):
 
 
 def handle_search(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    📌 FEATURE: Web Search
-    📝 DESCRIPTION: Google search karo
-    
-    Parameters:
-        message (str): User's search query
-    
-    Returns:
-        str: Search results summary
-    """
+    """Web Search - Google search karo"""
     query = re.sub(r'(search|google|pata karo|khojo|find|search karo|google search)', '', message, flags=re.IGNORECASE).strip()
     
     if not query:
         return "What would you like to search for?"
     
-    # 🔥 Search API integration yahan karo
-    # Abhi ke liye placeholder
     return f"🔍 Searching for: '{query}'\n\n(Search integration coming soon. Add Google Custom Search API or SerpAPI to enable.)"
 
 
 def handle_translate(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    📌 FEATURE: Language Translation
-    📝 DESCRIPTION: Text translate karo
-    
-    Parameters:
-        message (str): User's message with text to translate
-    
-    Returns:
-        str: Translated text
-    """
+    """Language Translation - text translate karo"""
     text = re.sub(r'(translate|anuvad|convert language|translate karo|bhasha badlo|language change)', '', message, flags=re.IGNORECASE).strip()
     
     if not text:
         return "क्या translate करना है? / What would you like to translate?"
     
-    # 🔥 Translation API integration yahan karo
-    # Abhi ke liye placeholder
     return f"🔤 Translation: '{text}'\n\n(Translation integration coming soon. Add Google Translate API or similar.)"
 
 
 def handle_code(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    📌 FEATURE: Code Generation
-    📝 DESCRIPTION: Code likho
-    
-    Parameters:
-        message (str): User's code request
-    
-    Returns:
-        str: Generated code
-    """
+    """Code Generation - code likho"""
     prompt = re.sub(r'(code|program|function|script|code likho|program banao|programming)', '', message, flags=re.IGNORECASE).strip()
     
     if not prompt:
@@ -373,16 +367,7 @@ def handle_code(message, history, all_history, campaign_id=None, **kwargs):
 
 
 def handle_summarize(message, history, all_history, campaign_id=None, **kwargs):
-    """
-    📌 FEATURE: Text Summarization
-    📝 DESCRIPTION: Kisi bhi text ka summary do
-    
-    Parameters:
-        message (str): User's text to summarize
-    
-    Returns:
-        str: Summary
-    """
+    """Text Summarization - kisi bhi text ka summary do"""
     text = re.sub(r'(summary|summarize|sankshep|short|shorten|short summary|summarise)', '', message, flags=re.IGNORECASE).strip()
     
     if not text:
@@ -391,6 +376,249 @@ def handle_summarize(message, history, all_history, campaign_id=None, **kwargs):
     system = f"Summarize the following text concisely and clearly:\n\n{text}"
     messages = [{"role": "user", "content": system}]
     return ai_chat(messages, temperature=0.5, max_tokens=300)
+
+
+# ============================================================
+# 🆕 NEW HANDLERS - RapidWorkers Automation Ke Liye
+# ============================================================
+
+def handle_reddit_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Reddit Task
+    📝 DESCRIPTION: Reddit Comments, Upvote, Join Subreddit
+    
+    🔧 HOW IT WORKS:
+        1. User command detect karega
+        2. Task executor ko call karega
+        3. Result return karega
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        # Demo task data
+        task = {
+            'title': 'Reddit Comment',
+            'type': 'reddit',
+            'pay': 0.10,
+            'url': 'https://www.reddit.com/r/test/',
+            'time': 60
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Reddit task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Reddit task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_youtube_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: YouTube Task
+    📝 DESCRIPTION: YouTube Search, Watch, Like, Subscribe
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'YouTube Task',
+            'type': 'youtube',
+            'pay': 0.05,
+            'search': 'AI crypto bot',
+            'watch_time': 120,
+            'time': 300
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ YouTube task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ YouTube task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_social_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Social Task
+    📝 DESCRIPTION: Behance, TikTok, Instagram, Twitter Tasks
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'Behance Task',
+            'type': 'behance',
+            'pay': 0.05,
+            'url': 'https://www.behance.net/',
+            'time': 60
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Social task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Social task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_review_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Review Task
+    📝 DESCRIPTION: GMB Reviews, Trustpilot Reviews
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'GMB Review',
+            'type': 'review',
+            'pay': 0.05,
+            'url': 'https://www.google.com/maps/',
+            'time': 120
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Review task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Review task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_facebook_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Facebook Task
+    📝 DESCRIPTION: Facebook Comments, Invite, Follow
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'Facebook Comment',
+            'type': 'facebook',
+            'pay': 0.20,
+            'url': 'https://www.facebook.com/',
+            'time': 300
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Facebook task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Facebook task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_report_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Report Task
+    📝 DESCRIPTION: Fake Ad Report, Fake Listing Report
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'Fake Ad Report',
+            'type': 'report',
+            'pay': 0.22,
+            'url': 'https://example.com/report',
+            'time': 180
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Report task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Report task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_form_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Form Task
+    📝 DESCRIPTION: Form Filling, Copy-Paste, Survey
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'Form Filling',
+            'type': 'form',
+            'pay': 0.21,
+            'url': 'https://example.com/form',
+            'time': 180,
+            'fields': {
+                'input[name="name"]': 'Test User',
+                'input[name="email"]': 'test@email.com'
+            }
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Form task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Form task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_signup_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 FEATURE: Signup Task
+    📝 DESCRIPTION: Gmail Signup, Account Create
+    """
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        
+        task = {
+            'title': 'Gmail Signup',
+            'type': 'signup',
+            'pay': 0.10,
+            'url': 'https://accounts.google.com/signup',
+            'time': 120,
+            'fields': {
+                'input[name="firstName"]': 'Test',
+                'input[name="lastName"]': 'User'
+            }
+        }
+        
+        result = executor.execute(task)
+        
+        if result.get('success'):
+            return f"✅ Signup task complete! Earned: ${result.get('earned', 0)}"
+        else:
+            return f"❌ Signup task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 
 
 # ============================================================
@@ -419,8 +647,13 @@ def handle_new_feature(message, history, all_history, campaign_id=None, **kwargs
         2. Ye function add karo
         3. Deploy karo
     '''
-    # 📝 Your logic here
-    return "Response from new feature"
+    try:
+        from task_executor import TaskExecutor
+        executor = TaskExecutor()
+        # 📝 Your logic here
+        return "✅ Task complete!"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 """
 
 
