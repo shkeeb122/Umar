@@ -6,3 +6,6 @@ pytrends
 easyocr
 opencv-python
 numpy
+playwright
+playwright-stealth
+twocaptcha
