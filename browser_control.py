@@ -1,17 +1,10 @@
-# ============================================================
+ # ============================================================
 # 📁 FILE: browser_control.py
-# 🎯 ROLE: Playwright + Stealth Browser Control
+# 🎯 ROLE: Playwright Browser Control (Without playwright_stealth)
 # 🔗 USED BY: task_executor.py, main.py
-# 🔧 WHAT IT DOES:
-#   1. Browser start with Stealth (Anti-Detection)
-#   2. Google Login for RapidWorkers
-#   3. Human-like interactions (click, type, scroll)
-#   4. Screenshot capture
-#   5. Browser close
 # ============================================================
 
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync  # ✅ Direct import
 from human_emulator import HumanEmulator
 from config import *
 import time
@@ -19,8 +12,8 @@ import random
 
 class BrowserController:
     """
-    🌐 Playwright + Stealth Browser Controller
-    Bot detection se bachne ke liye Stealth mode + Human touch
+    🌐 Playwright Browser Controller
+    Bot detection se bachne ke liye manual stealth
     """
     
     def __init__(self, headless=PLAYWRIGHT_HEADLESS):
@@ -32,12 +25,48 @@ class BrowserController:
         self.is_logged_in = False
     
     # ============================================================
-    # 1. BROWSER START — Playwright + Stealth
+    # 🔥 MANUAL STEALTH — WITHOUT playwright_stealth
+    # ============================================================
+    
+    def apply_stealth(self, page):
+        """
+        🛡️ Manual stealth script
+        Bot detection bypass ke liye
+        """
+        page.add_init_script("""
+            // Remove webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            // Add plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            // Add languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+            
+            // Add chrome object
+            window.chrome = { runtime: {} };
+            
+            // Fix permissions
+            Object.defineProperty(navigator, 'permissions', {
+                get: () => ({
+                    query: () => Promise.resolve({ state: 'prompt' })
+                })
+            });
+        """)
+    
+    # ============================================================
+    # 1. BROWSER START — With Manual Stealth
     # ============================================================
     
     def start(self):
         """
-        🚀 Browser start with Stealth mode
+        🚀 Browser start with manual stealth
         Headless = False (Visible mode — safe)
         """
         print("🌐 Starting browser...")
@@ -61,8 +90,8 @@ class BrowserController:
             viewport={'width': width, 'height': height}
         )
         
-        # 🚀 Apply Stealth (Anti-Detection)
-        stealth_sync(self.page)
+        # 🚀 Apply manual stealth (no playwright_stealth)
+        self.apply_stealth(self.page)
         
         # Random user-agent
         self.page.set_extra_http_headers({
@@ -73,7 +102,7 @@ class BrowserController:
             ])
         })
         
-        print("✅ Browser started with Stealth mode!")
+        print("✅ Browser started with manual stealth!")
         return self.page
     
     # ============================================================
@@ -227,4 +256,4 @@ class BrowserController:
         self.go_to("https://rapidworkers.com/login")
         result = self.google_login()
         self.wait_for_page()
-        return result
+        return result         
