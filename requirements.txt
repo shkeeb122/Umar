@@ -1,17 +1,8 @@
-# ============================================================
-# 📁 requirements.txt - IMAGE UNDERSTANDING + DEPLOY READY
-# 🔧 USED: Mistral API for image (not easyocr/opencv)
-# ============================================================
-
-# Core Web
 flask
 requests
 gunicorn
 flask-cors
-
-# Browser Automation
 playwright
 playwright-stealth
-
-# Captcha
 twocaptcha
+schedule
