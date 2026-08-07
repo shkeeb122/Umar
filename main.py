@@ -23,7 +23,7 @@
 
 import time
 import random
-import schedule
+import schedule  # 🔥 FIX: Added this import
 from datetime import datetime
 from threading import Thread, Event
 
