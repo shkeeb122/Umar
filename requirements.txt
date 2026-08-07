@@ -3,6 +3,5 @@ requests
 gunicorn
 flask-cors
 playwright
-playwright-stealth
 twocaptcha
 schedule
