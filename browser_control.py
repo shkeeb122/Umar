@@ -11,11 +11,7 @@
 # ============================================================
 
 from playwright.sync_api import sync_playwright
-# 🔥 FIX: Try-except for playwright-stealth import
-try:
-    from playwright_stealth import stealth_sync
-except ImportError:
-    from playwright_stealth import stealth_async as stealth_sync
+from playwright_stealth import stealth_sync  # ✅ Direct import
 from human_emulator import HumanEmulator
 from config import *
 import time
