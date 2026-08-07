@@ -247,6 +247,24 @@ INTENT_REGISTRY = {
         "description": "Gmail Signup, Account Create",
         "example": "Gmail account banao"
     },
+    
+    # ============================================================
+    # 🔥 RAPIDWORKER AUTOMATION - Sabhi Commands Ke Liye
+    # ============================================================
+    
+    "rapidworker_automation": {
+        "keywords": [
+            "rapidworker", "rapid work", "rapid worker",
+            "task karo", "kaam karo", "automation start",
+            "rapid pe jao", "rapidworker start",
+            "rapid par jao", "rapidworker task",
+            "rapidworker pe jao"
+        ],
+        "handler": "handle_rapidworker_automation",
+        "priority": 2,
+        "description": "RapidWorker Automation — Start/Stop/Status",
+        "example": "Rapidworker par task karo"
+    },
 }
 
 
@@ -386,17 +404,11 @@ def handle_reddit_task(message, history, all_history, campaign_id=None, **kwargs
     """
     📌 FEATURE: Reddit Task
     📝 DESCRIPTION: Reddit Comments, Upvote, Join Subreddit
-    
-    🔧 HOW IT WORKS:
-        1. User command detect karega
-        2. Task executor ko call karega
-        3. Result return karega
     """
     try:
         from task_executor import TaskExecutor
         executor = TaskExecutor()
         
-        # Demo task data
         task = {
             'title': 'Reddit Comment',
             'type': 'reddit',
@@ -616,6 +628,65 @@ def handle_signup_task(message, history, all_history, campaign_id=None, **kwargs
             return f"✅ Signup task complete! Earned: ${result.get('earned', 0)}"
         else:
             return f"❌ Signup task failed: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+# ============================================================
+# 🔥 RAPIDWORKER AUTOMATION HANDLER
+# ============================================================
+
+def handle_rapidworker_automation(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📌 RapidWorker Automation Handler
+    📝 Commands: start, stop, status, pause, resume
+    
+    Parameters:
+        message (str): User's command
+    
+    Returns:
+        str: Response from orchestrator
+    """
+    try:
+        from main import MainOrchestrator
+        orchestrator = MainOrchestrator()
+        
+        msg_lower = message.lower()
+        
+        # Check command type
+        if any(word in msg_lower for word in ["start", "shuru", "chalao", "jao", "task karo", "kaam karo"]):
+            result = orchestrator.start_automation()
+            return f"🚀 {result}"
+        
+        elif any(word in msg_lower for word in ["stop", "band", "rok", "band karo"]):
+            result = orchestrator.stop_automation()
+            return f"🛑 {result}"
+        
+        elif any(word in msg_lower for word in ["status", "haal", "kya chal raha", "kya ho raha", "kitna kama liya"]):
+            status = orchestrator.get_status()
+            return f"""
+📊 **Current Status**
+━━━━━━━━━━━━━━━━━━━━
+📌 Status: {status.get('status', 'unknown')}
+✅ Tasks Done: {status.get('tasks_completed', 0)}
+💰 Earning: {status.get('total_earned', '$0.00')}
+⏱️ Uptime: {status.get('uptime', 0)//60} minutes
+━━━━━━━━━━━━━━━━━━━━
+"""
+        
+        elif any(word in msg_lower for word in ["pause", "thoda ruko"]):
+            result = orchestrator.pause_automation()
+            return f"⏸️ {result}"
+        
+        elif any(word in msg_lower for word in ["resume", "phir se chalao", "continue"]):
+            result = orchestrator.resume_automation()
+            return f"▶️ {result}"
+        
+        else:
+            # Default: start automation
+            result = orchestrator.start_automation()
+            return f"🚀 {result}"
             
     except Exception as e:
         return f"❌ Error: {str(e)}"
