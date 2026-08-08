@@ -56,12 +56,15 @@ class MainOrchestrator:
         minute = random.randint(0, 59)
         return f"{hour:02d}:{minute:02d}"
     
-    # ✅ 🔥 FIX: Weekend off disable
     def _is_weekend(self):
         """📆 Check if today is weekend"""
         return False  # 🔥 Force disable weekend off for testing
     
-    def start_automation(self, command=None):
+    # ============================================================
+    # 🚀 FIXED: start_automation() — Await Added
+    # ============================================================
+    
+    async def start_automation(self, command=None):
         if self.is_running:
             return "⚠️ Automation already running!"
         
@@ -78,10 +81,12 @@ class MainOrchestrator:
         print("=" * 60)
         
         print("🌐 Starting browser...")
-        self.browser.start()
-        self.browser.go_to("https://rapidworkers.com")
-        self.browser.google_login()
-        self.browser.wait_for_page()
+        
+        # ✅ 🔥 FIX: Await added
+        await self.browser.start()
+        await self.browser.go_to("https://rapidworkers.com")
+        await self.browser.google_login()
+        await self.browser.wait_for_page()
         
         while not self._should_stop():
             if self.is_paused:
