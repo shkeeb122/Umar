@@ -1,21 +1,20 @@
 # ============================================================
 # 📁 FILE: browser_control.py
-# 🎯 ROLE: Playwright Browser Control (Without playwright_stealth)
+# 🎯 ROLE: Playwright Browser Control (Render Optimized)
 # 🔗 USED BY: task_executor.py, main.py
 # ============================================================
 
+import os
+import time
+import random
 from playwright.sync_api import sync_playwright
 from human_emulator import HumanEmulator
 from config import *
-import time
-import random
-
-# ✅ No import from main.py or task_executor.py here
 
 class BrowserController:
     """
     🌐 Playwright Browser Controller
-    Bot detection se bachne ke liye manual stealth
+    Render ke hisaab se optimized — browser path set
     """
     
     def __init__(self, headless=PLAYWRIGHT_HEADLESS):
@@ -39,8 +38,21 @@ class BrowserController:
         print("🌐 Starting browser...")
         
         self.playwright = sync_playwright().start()
+        
+        # ============================================================
+        # 🔥 RENDER BROWSER PATH - YEHI FIX HAI
+        # ============================================================
+        browser_path = os.environ.get('PLAYWRIGHT_BROWSERS_PATH', '')
+        executable_path = None
+        
+        if browser_path:
+            # Render build artifact path
+            executable_path = f"{browser_path}/chromium-1234/chrome-linux/chrome"
+            print(f"📁 Using browser path: {executable_path}")
+        
         self.browser = self.playwright.chromium.launch(
             headless=self.headless,
+            executable_path=executable_path,
             args=[
                 '--disable-blink-features=AutomationControlled',
                 '--disable-dev-shm-usage',
