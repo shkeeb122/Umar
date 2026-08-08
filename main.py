@@ -62,7 +62,7 @@ class MainOrchestrator:
         return False  # 🔥 Force disable weekend off for testing
     
     # ============================================================
-    # 🚀 FIXED: start_automation() — Await Added
+    # ✅ 🔥 FIXED: start_automation() — async def
     # ============================================================
     
     async def start_automation(self, command=None):
@@ -83,7 +83,7 @@ class MainOrchestrator:
         
         print("🌐 Starting browser...")
         
-        # ✅ 🔥 FIX: Await added
+        # ✅ 🔥 Await added
         await self.browser.start()
         await self.browser.go_to("https://rapidworkers.com")
         await self.browser.google_login()
