@@ -8,6 +8,7 @@ import random
 import schedule
 from datetime import datetime
 from threading import Thread, Event
+import asyncio
 
 from config import *
 from browser_control import BrowserController
@@ -195,6 +196,10 @@ class MainOrchestrator:
             self.executor.browser.human_click("button[type='submit']")
             print("✅ Withdrawal request submitted!")
     
+    # ============================================================
+    # 🚀 FIXED: run() — Schedule Async Wrapper
+    # ============================================================
+    
     def run(self):
         if self._is_weekend():
             print("🎉 Weekend off! No work today.")
@@ -209,7 +214,7 @@ class MainOrchestrator:
         print("=" * 60)
         
         schedule_time = self._get_daily_schedule()
-        schedule.every().day.at(schedule_time).do(self.start_automation)
+        schedule.every().day.at(schedule_time).do(lambda: asyncio.run(self.start_automation()))
         
         print(f"📌 Next scheduled run: {schedule_time}")
         print("🤖 System is waiting...")
@@ -218,8 +223,13 @@ class MainOrchestrator:
             schedule.run_pending()
             time.sleep(60)
     
+    # ============================================================
+    # 🚀 FIXED: run_now() — Async Await Added
+    # ============================================================
+    
     def run_now(self):
-        self.start_automation()
+        """▶️ Run immediately (for testing)"""
+        asyncio.run(self.start_automation())
 
 if __name__ == "__main__":
     orchestrator = MainOrchestrator()
