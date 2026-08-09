@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: Umar
+    runtime: image
+    plan: free
+    image:
+      url: mcr.microsoft.com/playwright:latest
+    buildCommand: ""
+    startCommand: "gunicorn --timeout=300 --workers=2 app:app"
+    envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright
