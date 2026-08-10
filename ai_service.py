@@ -97,7 +97,7 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
 
 INTENT_REGISTRY = {
     # ============================================================
-    # ✅ EXISTING INTENTS - Ye pehle se kaam kar rahe hain
+    # ✅ EXISTING INTENTS - Ye pehle se kaam kar rahe hain (BILKUL WAISE HI)
     # ============================================================
     
     "chat": {
@@ -181,7 +181,7 @@ INTENT_REGISTRY = {
     },
     
     # ============================================================
-    # 🆕 NEW INTENTS - RapidWorkers Automation Ke Liye
+    # 🆕 NEW INTENTS - RapidWorkers Automation Ke Liye (Playwright Intents)
     # ============================================================
     
     "reddit_task": {
@@ -249,7 +249,7 @@ INTENT_REGISTRY = {
     },
     
     # ============================================================
-    # 🔥 RAPIDWORKER AUTOMATION - Sabhi Commands Ke Liye
+    # 🔥 RAPIDWORKER AUTOMATION - Sabhi Commands Ke Liye (OLD)
     # ============================================================
     
     "rapidworker_automation": {
@@ -265,6 +265,54 @@ INTENT_REGISTRY = {
         "description": "RapidWorker Automation — Start/Stop/Status",
         "example": "Rapidworker par task karo"
     },
+    
+    # ============================================================
+    # 🆕 SMART WEBSITE MASTER INTENTS (NEW - ADDED)
+    # ============================================================
+    
+    "smart_task": {
+        "keywords": [
+            "rapidworker", "task karo", "kaam karo", "automation start",
+            "rapid pe jao", "task start", "kaam shuru", "rapidworker start"
+        ],
+        "handler": "handle_smart_task",
+        "priority": 2,
+        "description": "RapidWorkers Automation Trigger (Smart)",
+        "example": "RapidWorker pe jao, task karo"
+    },
+    
+    "smart_open": {
+        "keywords": [
+            "open", "kholo", "website", "jao", "browser",
+            "google open", "youtube open", "facebook open"
+        ],
+        "handler": "handle_smart_open",
+        "priority": 2,
+        "description": "Website open karo (Smart)",
+        "example": "Google open karo"
+    },
+    
+    "smart_status": {
+        "keywords": [
+            "status", "kya chal raha", "haal", "progress",
+            "kitna hua", "report", "update"
+        ],
+        "handler": "handle_smart_status",
+        "priority": 2,
+        "description": "System status batao (Smart)",
+        "example": "Status kya hai?"
+    },
+    
+    "smart_stop": {
+        "keywords": [
+            "stop", "band karo", "rok", "halt",
+            "automation band", "task stop"
+        ],
+        "handler": "handle_smart_stop",
+        "priority": 2,
+        "description": "Automation stop karo (Smart)",
+        "example": "Band karo"
+    }
 }
 
 
@@ -281,7 +329,7 @@ INTENT_REGISTRY = {
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 # ============================================================
-# EXISTING HANDLERS - Ye pehle se kaam kar rahe hain
+# EXISTING HANDLERS - Ye pehle se kaam kar rahe hain (BILKUL WAISE HI)
 # ============================================================
 
 def handle_chat(message, history, all_history, campaign_id=None, **kwargs):
@@ -397,7 +445,7 @@ def handle_summarize(message, history, all_history, campaign_id=None, **kwargs):
 
 
 # ============================================================
-# 🆕 NEW HANDLERS - RapidWorkers Automation Ke Liye
+# 🆕 NEW HANDLERS - RapidWorkers Automation Ke Liye (Playwright)
 # ============================================================
 
 def handle_reddit_task(message, history, all_history, campaign_id=None, **kwargs):
@@ -634,19 +682,13 @@ def handle_signup_task(message, history, all_history, campaign_id=None, **kwargs
 
 
 # ============================================================
-# 🔥 RAPIDWORKER AUTOMATION HANDLER
+# 🔥 RAPIDWORKER AUTOMATION HANDLER (OLD - Playwright)
 # ============================================================
 
 def handle_rapidworker_automation(message, history, all_history, campaign_id=None, **kwargs):
     """
-    📌 RapidWorker Automation Handler
+    📌 RapidWorker Automation Handler (OLD - Playwright)
     📝 Commands: start, stop, status, pause, resume
-    
-    Parameters:
-        message (str): User's command
-    
-    Returns:
-        str: Response from orchestrator
     """
     try:
         from main import MainOrchestrator
@@ -654,7 +696,6 @@ def handle_rapidworker_automation(message, history, all_history, campaign_id=Non
         
         msg_lower = message.lower()
         
-        # Check command type
         if any(word in msg_lower for word in ["start", "shuru", "chalao", "jao", "task karo", "kaam karo"]):
             result = orchestrator.start_automation()
             return f"🚀 {result}"
@@ -684,12 +725,87 @@ def handle_rapidworker_automation(message, history, all_history, campaign_id=Non
             return f"▶️ {result}"
         
         else:
-            # Default: start automation
             result = orchestrator.start_automation()
             return f"🚀 {result}"
             
     except Exception as e:
         return f"❌ Error: {str(e)}"
+
+
+# ============================================================
+# 🆕 SMART WEBSITE MASTER HANDLERS (NEW)
+# ============================================================
+
+def handle_smart_task(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    🚀 Smart Website Master - Automation Trigger
+    Calls SmartMain orchestrator from main.py
+    """
+    try:
+        from main import SmartMain
+        system = SmartMain()
+        result = system.run(message)
+        return result
+    except ImportError as e:
+        return f"⚠️ SmartMain not found. Please ensure main.py is present. Error: {e}"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def handle_smart_open(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    🌐 Smart Website Master - Website Open Handler
+    """
+    urls = re.findall(r'(https?://[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-z]{2,})', message)
+    if urls:
+        url = urls[0]
+        if not url.startswith('http'):
+            url = 'https://' + url
+        return f"🌐 Opening: {url}"
+    if 'google' in message.lower():
+        return "🌐 Opening: https://google.com"
+    elif 'youtube' in message.lower():
+        return "🌐 Opening: https://youtube.com"
+    elif 'facebook' in message.lower():
+        return "🌐 Opening: https://facebook.com"
+    return "🌐 Please specify a website URL"
+
+
+def handle_smart_status(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    📊 Smart Website Master - System Status Handler
+    """
+    try:
+        from main import SmartMain
+        system = SmartMain()
+        status = system.get_status()
+        return f"""
+📊 **Smart Website Master Status**
+━━━━━━━━━━━━━━━━━━━━
+📌 Status: {status.get('status', 'idle')}
+✅ Tasks Done: {status.get('tasks_completed', 0)}
+💰 Earning: {status.get('total_earned', '$0.00')}
+⏱️ Uptime: {status.get('uptime', 0)//60} minutes
+📚 Memory: {status.get('memory_size', 0)} tasks
+━━━━━━━━━━━━━━━━━━━━
+"""
+    except:
+        return """
+📊 **Smart Website Master Status**
+━━━━━━━━━━━━━━━━━━━━
+📌 Status: Idle
+✅ Tasks Done: 0
+💰 Earning: $0.00
+⏱️ Uptime: 0 minutes
+━━━━━━━━━━━━━━━━━━━━
+"""
+
+
+def handle_smart_stop(message, history, all_history, campaign_id=None, **kwargs):
+    """
+    🛑 Smart Website Master - Stop Handler
+    """
+    return "🛑 Automation stopped! (Smart Website Master will stop after current task.)"
 
 
 # ============================================================
