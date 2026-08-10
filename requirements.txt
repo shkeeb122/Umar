@@ -2,6 +2,5 @@ flask
 requests
 gunicorn
 flask-cors
-playwright
-twocaptcha
+websocket-client
 schedule
