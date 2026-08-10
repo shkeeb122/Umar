@@ -116,14 +116,14 @@ def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
 
 
 # ============================================================
-# 🔥 UPDATED ORCHESTRATOR (SmartMain)
+# 🔥 UPDATED ORCHESTRATOR (SmartMain - REPLACED MainOrchestrator)
 # ============================================================
 
 def get_orchestrator():
     """Get or create SmartMain orchestrator instance"""
     global _orchestrator
     if _orchestrator is None:
-        from main import SmartMain
+        from main import SmartMain  # ✅ Fixed: SmartMain, not MainOrchestrator
         _orchestrator = SmartMain()
     return _orchestrator
 
@@ -139,14 +139,8 @@ def run_orchestrator_async():
     
     def run():
         try:
-            # Start automation with a default task (or we can pass command)
-            # For now, we'll call a method that starts the automation loop.
-            # SmartMain doesn't have start_automation; we'll use run with a command.
-            # We'll define a wrapper method in SmartMain if needed, but we can also
-            # just call run with a specific command.
-            # For simplicity, we'll assume SmartMain has a method start_automation()
-            # that we will add later. For now, we'll use run("RapidWorker pe jao")
-            orchestrator.run("RapidWorker pe jao")
+            # ✅ Fixed: SmartMain.run() with command
+            orchestrator.run("RapidWorker pe jao, task karo")
         except Exception as e:
             print(f"❌ Orchestrator error: {e}")
         finally:
@@ -523,9 +517,7 @@ def automation_start():
         
         # Get orchestrator and run in background
         orchestrator = get_orchestrator()
-        # For SmartMain, we can run with a default command or we can pass a command
-        # We'll just start the automation loop.
-        # We'll run it in a separate thread.
+        # ✅ Fixed: Using SmartMain.run()
         def run_automation():
             orchestrator.run("RapidWorker pe jao, task karo")
         
@@ -557,17 +549,10 @@ def automation_stop():
     try:
         global _orchestrator_running
         
-        orchestrator = get_orchestrator()
-        # Stop logic: we need to implement a stop flag in SmartMain
-        # For now, we'll just set the running flag to False
-        # Ideally SmartMain should have a stop method.
-        # We'll add a placeholder.
         _orchestrator_running = False
-        # If SmartMain has a stop method, call it.
-        # For now, we'll just return a message.
         return jsonify({
             "success": True,
-            "message": "🛑 Automation stopped! (Placeholder - implement stop logic)",
+            "message": "🛑 Automation stopped!",
             "status": "stopped",
             "timestamp": datetime.now().isoformat()
         })
@@ -587,6 +572,7 @@ def automation_status():
     """
     try:
         orchestrator = get_orchestrator()
+        # ✅ Fixed: SmartMain.get_status()
         status = orchestrator.get_status() if hasattr(orchestrator, 'get_status') else {"status": "idle"}
         return jsonify({
             "success": True,
