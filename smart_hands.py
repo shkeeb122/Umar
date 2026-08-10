@@ -7,6 +7,7 @@
 import json
 import time
 import urllib.request
+import base64
 from websocket import create_connection
 from config import *
 
@@ -49,12 +50,20 @@ class SmartHands:
     # 2. SEND CDP COMMANDS
     # ============================================================
     
-    def send_command(self, method, params={}):
+    def send_command(self, method, params=None):
         """Send CDP command to browser"""
         if not self.is_connected:
             return {"error": "Browser not connected"}
         
-        message = {"id": int(time.time() * 1000), "method": method, "params": params}
+        if params is None:
+            params = {}
+        
+        # ✅ Fixed: Multi-line dictionary with proper commas
+        message = {
+            "id": int(time.time() * 1000),
+            "method": method,
+            "params": params
+        }
         try:
             self.ws.send(json.dumps(message))
             response = json.loads(self.ws.recv())
@@ -81,27 +90,29 @@ class SmartHands:
     def click(self, selector):
         """Click element via JavaScript"""
         print(f"🖱️ Clicking: {selector}")
-        js = f"""
-        try {
+        # ✅ Fixed: Proper JS string formatting
+        js = f'''
+        try {{
             var element = document.querySelector('{selector}');
-            if (element) {
+            if (element) {{
                 element.click();
                 return 'Clicked successfully';
-            } else {
+            }} else {{
                 return 'Element not found: {selector}';
-            }
-        } catch(e) {
+            }}
+        }} catch(e) {{
             return 'Error: ' + e.message;
-        }
-        """
+        }}
+        '''
         result = self.send_command("Runtime.evaluate", {"expression": js})
         return result
     
     def click_by_text(self, text):
         """Click by text content"""
         print(f"🖱️ Clicking by text: {text}")
-        js = f"""
-        try {
+        # ✅ Fixed: Proper JS string with escaped quotes
+        js = f'''
+        try {{
             var elements = document.querySelectorAll('button, a, input[type="submit"], div[role="button"]');
             for(var i=0; i<elements.length; i++) {{
                 if(elements[i].textContent.includes('{text}')) {{
@@ -110,10 +121,10 @@ class SmartHands:
                 }}
             }}
             return 'Element not found: {text}';
-        } catch(e) {
+        }} catch(e) {{
             return 'Error: ' + e.message;
-        }
-        """
+        }}
+        '''
         result = self.send_command("Runtime.evaluate", {"expression": js})
         return result
     
@@ -128,9 +139,9 @@ class SmartHands:
         self.send_command("Runtime.evaluate", {
             "expression": f"document.querySelector('{selector}').value = '';"
         })
-        # Then type
-        js = f"""
-        try {
+        # ✅ Fixed: Proper JS string with escaped brackets
+        js = f'''
+        try {{
             var element = document.querySelector('{selector}');
             if (element) {{
                 element.value = '{text}';
@@ -142,14 +153,15 @@ class SmartHands:
         }} catch(e) {{
             return 'Error: ' + e.message;
         }}
-        """
+        '''
         result = self.send_command("Runtime.evaluate", {"expression": js})
         return result
     
     def type_by_placeholder(self, placeholder, text):
         """Type by placeholder text"""
         print(f"⌨️ Typing in: {placeholder}")
-        js = f"""
+        # ✅ Fixed: Proper JS string with escaped brackets
+        js = f'''
         try {{
             var elements = document.querySelectorAll('input, textarea');
             for(var i=0; i<elements.length; i++) {{
@@ -163,7 +175,7 @@ class SmartHands:
         }} catch(e) {{
             return 'Error: ' + e.message;
         }}
-        """
+        '''
         result = self.send_command("Runtime.evaluate", {"expression": js})
         return result
     
@@ -214,7 +226,6 @@ class SmartHands:
         print("📸 Taking screenshot...")
         result = self.send_command("Page.captureScreenshot", {"format": "png"})
         if 'result' in result and 'data' in result['result']:
-            import base64
             img_data = base64.b64decode(result['result']['data'])
             filename = f"screenshot_{int(time.time())}.png"
             with open(filename, "wb") as f:
