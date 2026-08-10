@@ -1,98 +1,197 @@
-# config.py - COMPLETE SYSTEM (Mistral + 2Captcha + Time + Human Touch)
-# ====================================================================
-# 📁 FILE: config.py
-# 🎯 ROLE: Settings - Sab kuch ek jagah
-# 🔗 USED BY: Sab files
-# 🔒 EXISTING SYSTEM: Bilkul nahi todega, sirf add karega
-# ====================================================================
+# ============================================================
+# 📁 FILE: smart_utils.py - HUMAN TOUCH + TIME MANAGEMENT
+# 🎯 ROLE: Human Emulation + Time Tracking + Utilities
+# 🔗 USED BY: smart_main.py, smart_hands.py
+# ============================================================
 
-import os
+import time
+import random
+from datetime import datetime
+from config import *
 
-# ================= 1. MISTRAL AI (Existing - No Change) =================
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
-MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
-MODEL_NAME = "mistral-small-latest"
-
-HEADERS = {
-    "Authorization": f"Bearer {MISTRAL_API_KEY}",
-    "Content-Type": "application/json"
-}
-
-BACKEND_URL = os.environ.get("BACKEND_URL", "https://umar-k20u.onrender.com")
-DATABASE_FILE = "ai_system.db"
-
-
-# ================= 2. 2CAPTCHA API (Client Key - Aapki Di Hui) =================
-TWOCAPTCHA_API_KEY = "d745d8bbaf5cd6d2b0a090f47e01a662"
-
-
-# ================= 3. GOOGLE LOGIN (RapidWorkers - Aapki Di Hui) =================
-GOOGLE_EMAIL = "Shkeebshah326@gmail.com"
-GOOGLE_PASSWORD = "BlueTiger#72!RiverSky"
-# Agar 2FA hai toh App Password yahan daalein
-GOOGLE_APP_PASSWORD = ""  # Optional - Agar 2FA enabled hai toh bhar dein
-
-
-# ================= 4. PLAYWRIGHT SETTINGS (Browser Automation) =================
-PLAYWRIGHT_HEADLESS = False   # False = Visible Mode (Safe)
-PLAYWRIGHT_TIMEOUT = 30000    # 30 Seconds
-
-
-# ================= 5. HUMAN TOUCH SETTINGS (Bot Se Bachne Ke Liye) =================
-TYPING_SPEED_MIN = 30         # WPM (Slow)
-TYPING_SPEED_MAX = 60         # WPM (Fast)
-MISTAKE_RATE = 0.12           # 12% Typos/Mistakes
-BREAK_CHANCE = 0.30           # 30% Chance of Break
-BREAK_MIN = 5                 # Minimum Break (Minutes)
-BREAK_MAX = 15                # Maximum Break (Minutes)
-SKIP_RATE = 0.10              # 10% Chance of Skipping Task
-
-
-# ================= 6. TIME MANAGEMENT (Human Speed) =================
-TIME_BUFFER_PERCENT = 0.15    # 15% Buffer (2 min → 1 min 42 sec)
-MIN_TASK_TIME = 30            # Minimum 30 Seconds Per Task
-MAX_TASK_TIME = 600           # Maximum 10 Minutes Per Task
-HUMAN_DELAY_MIN = 1           # 1 Second Minimum Delay
-HUMAN_DELAY_MAX = 5           # 5 Seconds Maximum Delay
-
-
-# ================= 7. TASK SELECTION (Smart Filter) =================
-MIN_PAY = 0.10                # Minimum $0.10 Per Task
-MIN_FILLED_PERCENT = 60       # Minimum 60% Filled Tasks
-MAX_TASKS_PER_DAY = 50        # Maximum 50 Tasks Per Day
-MAX_TASK_TIME_MIN = 8         # Maximum 8 Minutes Per Task
-
-
-# ================= 8. BLACKLIST (Auto-Skip Scam Tasks) =================
-BLACKLISTED_TASKS = [
-    "bitresurrector",
-    "gift card",
-    "casino",
-    "royal cams",
-    "bongocams",
-    "4 offers",
-    "navi app",
-    "bybit",
-    "kyc",
-    "download apk",
-    "install software",
-    "win coins",
-    "hot packet"
-]
-
-
-# ================= VALIDATION (Existing System) =================
-if not MISTRAL_API_KEY:
-    print("⚠️ WARNING: MISTRAL_API_KEY not set in environment variables!")
-else:
-    print("✅ Mistral API Key configured")
-
-if TWOCAPTCHA_API_KEY:
-    print("✅ 2Captcha API Key configured")
-else:
-    print("⚠️ WARNING: 2Captcha API Key not set!")
-
-if GOOGLE_EMAIL and GOOGLE_PASSWORD:
-    print("✅ Google Credentials configured")
-else:
-    print("⚠️ WARNING: Google Credentials not set!")
+class SmartUtils:
+    """
+    🧠 Human Touch + Time Management
+    """
+    
+    def __init__(self):
+        self.task_start_time = None
+        self.total_time_spent = 0
+        self.actions = 0
+    
+    # ============================================================
+    # 1. HUMAN DELAYS (सोचने का समय)
+    # ============================================================
+    
+    def human_delay(self, min_sec=HUMAN_DELAY_MIN, max_sec=HUMAN_DELAY_MAX):
+        """Random human-like delay"""
+        delay = random.uniform(min_sec, max_sec)
+        time.sleep(delay)
+        return delay
+    
+    def thinking_time(self):
+        """Human thinking time (1-3 sec)"""
+        return self.human_delay(1, 3)
+    
+    def action_pause(self):
+        """Pause between actions (0.5-2 sec)"""
+        return self.human_delay(0.5, 2)
+    
+    # ============================================================
+    # 2. HUMAN TYPING (इंसानी टाइपिंग)
+    # ============================================================
+    
+    def get_typing_speed(self):
+        """Random typing speed (30-60 WPM)"""
+        return random.uniform(TYPING_SPEED_MIN, TYPING_SPEED_MAX)
+    
+    def human_type(self, text, speed_wpm=None):
+        """
+        Human-like typing with random speed + typos
+        """
+        if speed_wpm is None:
+            speed_wpm = self.get_typing_speed()
+        
+        # Convert WPM to characters per second
+        chars_per_sec = speed_wpm * 5 / 60
+        base_delay = 1 / chars_per_sec if chars_per_sec > 0 else 0.05
+        
+        typed_text = ""
+        for char in text:
+            # Random speed variation (50-150% of base)
+            delay = base_delay * random.uniform(0.5, 1.5)
+            time.sleep(delay)
+            
+            # Typos (12% chance)
+            if random.random() < MISTAKE_RATE:
+                wrong_char = chr(ord(char) + random.randint(-3, 3))
+                typed_text += wrong_char
+                # Correct typo
+                time.sleep(delay * 1.5)
+                typed_text += char
+                continue
+            
+            typed_text += char
+        
+        return typed_text
+    
+    # ============================================================
+    # 3. HUMAN MOUSE (इंसानी माउस)
+    # ============================================================
+    
+    def human_mouse_move(self, hands, target_x, target_y):
+        """Human-like mouse movement (curved path)"""
+        # Get current position (simulated)
+        current_x, current_y = 0, 0  # Will be replaced with actual JS
+        
+        # Generate bezier curve points
+        steps = random.randint(15, 30)
+        for i in range(steps):
+            t = i / steps
+            # Bezier with random control points
+            cx = random.randint(-100, 100)
+            cy = random.randint(-100, 100)
+            x = (1-t)**3 * current_x + 3*(1-t)**2*t * (current_x+cx) + 3*(1-t)*t**2 * (target_x+cx) + t**3 * target_x
+            y = (1-t)**3 * current_y + 3*(1-t)**2*t * (current_y+cy) + 3*(1-t)*t**2 * (target_y+cy) + t**3 * target_y
+            # Send mouse move command via JS
+            hands.send_command("Runtime.evaluate", {
+                "expression": f"window.scrollTo({int(x)}, {int(y)})"
+            })
+            time.sleep(random.uniform(0.002, 0.01))
+    
+    # ============================================================
+    # 4. TIME MANAGEMENT (समय प्रबंधन)
+    # ============================================================
+    
+    def start_task_timer(self):
+        """Task start time track karo"""
+        self.task_start_time = datetime.now()
+        return self.task_start_time
+    
+    def get_elapsed_time(self):
+        """Task mein kitna time laga"""
+        if self.task_start_time:
+            elapsed = (datetime.now() - self.task_start_time).total_seconds()
+            return elapsed
+        return 0
+    
+    def get_target_time(self, estimated_seconds):
+        """
+        🎯 Target time calculate karo (Human Speed)
+        Example: 2 min task = 1 min 42 sec
+        """
+        buffer_time = estimated_seconds * (1 - TIME_BUFFER_PERCENT)
+        # Add some random variation (90-110%)
+        target_time = buffer_time * random.uniform(0.9, 1.1)
+        return max(MIN_TASK_TIME, min(MAX_TASK_TIME, target_time))
+    
+    def wait_for_target(self, estimated_seconds):
+        """
+        ⏱️ Target time ke hisaab se wait karo
+        """
+        target = self.get_target_time(estimated_seconds)
+        elapsed = self.get_elapsed_time()
+        
+        if elapsed < target:
+            remaining = target - elapsed
+            print(f"⏳ Waiting {remaining:.1f}s to match human speed...")
+            time.sleep(remaining)
+            return True
+        return False
+    
+    def track_time(self, estimated_seconds):
+        """
+        📊 Time track karo aur report do
+        """
+        self.start_task_timer()
+        elapsed = self.get_elapsed_time()
+        target = self.get_target_time(estimated_seconds)
+        return {
+            "elapsed": elapsed,
+            "target": target,
+            "diff": target - elapsed,
+            "on_time": elapsed <= target
+        }
+    
+    # ============================================================
+    # 5. HUMAN BREAKS (आराम)
+    # ============================================================
+    
+    def take_break(self, chance=BREAK_CHANCE):
+        """Random break lelo"""
+        if random.random() < chance:
+            duration = random.randint(BREAK_MIN, BREAK_MAX)
+            print(f"☕ Taking break for {duration} minutes...")
+            time.sleep(duration * 60)
+            return True
+        return False
+    
+    # ============================================================
+    # 6. HUMAN MISTAKES (गलतियाँ)
+    # ============================================================
+    
+    def should_make_mistake(self, chance=MISTAKE_RATE):
+        """Kya mistake karein?"""
+        return random.random() < chance
+    
+    def should_skip_task(self, chance=SKIP_RATE):
+        """Kya task skip karein?"""
+        return random.random() < chance
+    
+    # ============================================================
+    # 7. UTILITIES (मददगार फंक्शन्स)
+    # ============================================================
+    
+    def random_element(self, elements):
+        """List se random element choose karo"""
+        if not elements:
+            return None
+        return random.choice(elements)
+    
+    def get_current_time(self):
+        """Current time as string"""
+        return datetime.now().strftime("%H:%M:%S")
+    
+    def get_today_date(self):
+        """Today's date as string"""
+        return datetime.now().strftime("%Y-%m-%d")
