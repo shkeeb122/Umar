@@ -1,7 +1,7 @@
 # ============================================================
-# smart_hands.py — ULTIMATE KHATARNAK ENGINE v13.0
+# smart_hands.py — ULTIMATE KHATARNAK ENGINE v14.0
 # 10 BYPASS TECHNIQUES — 100,000% WORKING
-# MEMORY OPTIMIZED — RENDER FREE TIER COMPATIBLE
+# MULTI-PLATFORM SUPPORT — RapidWorkers, TimeBucks, Freecash, Swagbucks, YSense
 # ============================================================
 
 import json, time, urllib.request, subprocess, shutil, os, sys, random
@@ -38,7 +38,7 @@ class SmartLogger:
 logger = SmartLogger()
 
 class SmartHands:
-    """ULTIMATE KHATARNAK ENGINE — 10 Bypass Techniques, 100,000% Reliable"""
+    """ULTIMATE KHATARNAK ENGINE — Multi-Platform Support"""
     
     def __init__(self, headless=True, proxy_list=None, captcha_api_key=None,
                  use_ai=False, max_parallel=5, enable_network=False):
@@ -48,7 +48,7 @@ class SmartHands:
         self.browser_path = None; self.temp_profile = None
         self.port = self._find_free_port()
         self.download_attempted = False
-        self.headless = True  # ⚡ FORCE HEADLESS — Memory bachao!
+        self.headless = True
         self.proxy_list = proxy_list or []
         self.current_proxy = None; self.captcha_api_key = captcha_api_key
         self.use_ai = use_ai; self.max_parallel = max_parallel
@@ -84,12 +84,11 @@ class SmartHands:
             logger.warn("⚠️ No Chrome found, downloading...")
             self.browser_path = self._download_chrome_enhanced()
         
-        # ---- BYPASS 5: Remote Browser (Ultimate Fallback) ----
+        # ---- BYPASS 5: Remote Browser ----
         if not self.browser_path and self.cloud_browser_fallback:
             logger.warn("⚠️ No local Chrome; using remote browser.")
             self.browser_path = 'cloud'
         elif not self.browser_path:
-            # Infinite download retry
             logger.warn("⚠️ No Chrome, starting infinite download loop...")
             for attempt in range(1000):
                 self.browser_path = self._download_chrome_enhanced()
@@ -100,13 +99,13 @@ class SmartHands:
                 raise RuntimeError("❌ Chrome not found after 1000 attempts!")
         
         atexit.register(self.close)
-        logger.info("✅ SmartHands initialized with 10 KHATARNAK bypass techniques.")
+        logger.info("✅ SmartHands initialized with multi-platform support.")
     
     # ============================================================
     # 🔥 BYPASS 1: Library Path Fix
     # ============================================================
     def _fix_library_path(self):
-        """🔧 Auto-set LD_LIBRARY_PATH — missing libraries ka khatarnaak solution"""
+        """🔧 Auto-set LD_LIBRARY_PATH"""
         lib_paths = [
             '/usr/lib/x86_64-linux-gnu',
             '/usr/lib',
@@ -124,7 +123,6 @@ class SmartHands:
             os.environ['CHROME_DEVEL_SANDBOX'] = ''
             logger.info(f"📁 Library paths set: {len(valid_paths)} paths")
         
-        # Try loading missing libraries dynamically
         try:
             import ctypes
             for lib in ['libnss3.so', 'libx11.so.6', 'libgbm.so.1', 'libxkbcommon.so.0']:
@@ -141,10 +139,10 @@ class SmartHands:
             pass
     
     # ============================================================
-    # 🔥 BYPASS 2: System Chrome (Dockerfile se install)
+    # 🔥 BYPASS 2: System Chrome
     # ============================================================
     def _find_system_chrome(self):
-        """🔍 System Chrome — Dockerfile se install hoga"""
+        """🔍 System Chrome"""
         paths = [
             '/usr/bin/google-chrome-stable',
             '/usr/bin/google-chrome',
@@ -160,7 +158,6 @@ class SmartHands:
             if p and os.path.exists(p) and os.access(p, os.X_OK):
                 logger.info(f"✅ System Chrome: {p}")
                 return p
-        # PATH lookup
         for cmd in ['google-chrome', 'chrome', 'chromium', 'chromium-browser']:
             p = shutil.which(cmd)
             if p:
@@ -169,10 +166,9 @@ class SmartHands:
         return None
     
     # ============================================================
-    # 🔥 BYPASS 3: Static Chrome (Self-Contained)
+    # 🔥 BYPASS 3: Static Chrome
     # ============================================================
     def _find_static_chrome(self):
-        """📥 Static Chrome — all libraries built-in"""
         static_dir = os.path.join(os.getcwd(), 'static_chrome')
         static_exe = os.path.join(static_dir, 'chrome')
         if os.path.exists(static_exe) and os.access(static_exe, os.X_OK):
@@ -199,10 +195,9 @@ class SmartHands:
         return None
     
     # ============================================================
-    # 🔥 BYPASS 4: Download Chrome + Fix Library Path
+    # 🔥 BYPASS 4: Download Chrome
     # ============================================================
     def _download_chrome_enhanced(self):
-        """📥 Download Chrome + auto-set library path"""
         chrome_dir = os.path.join(os.getcwd(), 'chrome-bin')
         os.makedirs(chrome_dir, exist_ok=True)
         cache_file = os.path.join(chrome_dir, 'chrome')
@@ -257,10 +252,9 @@ class SmartHands:
                 logger.debug(f"📥 Download: {percent}%")
     
     # ============================================================
-    # 🔥 BYPASS 5: Remote Browser (No Local Chrome)
+    # 🔥 BYPASS 5: Remote Browser
     # ============================================================
     def _connect_cloud_browser(self):
-        """🌐 Remote browser — library-free, memory-free!"""
         if not self.cloud_browser_fallback:
             return False
         try:
@@ -270,7 +264,7 @@ class SmartHands:
             self.ws = create_connection(ws_url, timeout=15)
             self.is_connected = True
             self.page_id = 'cloud'
-            logger.info("✅ Connected to cloud browser! (library-free, memory-free)")
+            logger.info("✅ Connected to cloud browser!")
             return True
         except Exception as e:
             logger.error(f"❌ Cloud browser failed: {e}")
@@ -293,7 +287,7 @@ class SmartHands:
         return 9222
     
     # ============================================================
-    # 🚀 BYPASS 6: Memory Optimized Chrome Launch
+    # 🚀 LAUNCH CHROME
     # ============================================================
     def _launch_chrome(self):
         if self.browser_path == 'cloud':
@@ -303,7 +297,7 @@ class SmartHands:
             return False
         
         logger.info(f"📁 Chrome: {self.browser_path}")
-        logger.info("🚀 Launching with MEMORY OPTIMIZED flags...")
+        logger.info("🚀 Launching with optimized flags...")
         
         self._fix_library_path()
         
@@ -314,7 +308,6 @@ class SmartHands:
         self.temp_profile = os.path.join(base, f"chrome_profile_{int(time.time())}_{random.randint(1000,9999)}")
         os.makedirs(self.temp_profile, exist_ok=True)
         
-        # ⚡ MEMORY OPTIMIZED FLAGS — Render Free Tier ke liye
         cmd = [self.browser_path,
                f"--remote-debugging-port={self.port}",
                f"--user-data-dir={self.temp_profile}",
@@ -338,10 +331,9 @@ class SmartHands:
                "--disable-sync",
                "--disable-hang-monitor",
                "--safebrowsing-disable-auto-update",
-               # ⚡ MEMORY OPTIMIZATION FLAGS
-               "--js-flags=--max-old-space-size=256",  # 512 se 256 karo
+               "--js-flags=--max-old-space-size=256",
                "--memory-pressure-off",
-               "--single-process",                     # Single process mode
+               "--single-process",
                "--disable-accelerated-2d-canvas",
                "--disable-accelerated-video-decode",
                "--disable-accelerated-video-encode",
@@ -349,8 +341,8 @@ class SmartHands:
                "--disable-accelerated-jpeg-decoding",
                "--disable-accelerated-x86",
                "--disable-accelerated-x86-canvas",
-               "--max_connections=5",                  # Connections limit
-               "--window-size=1280,720",               # Smaller window
+               "--max_connections=5",
+               "--window-size=1280,720",
                "--hide-scrollbars",
                "--no-first-run",
                "--no-default-browser-check",
@@ -358,10 +350,8 @@ class SmartHands:
                "--log-level=0",
         ]
         
-        # ⚡ FORCE HEADLESS — GUI band, memory 60% kam
         if self.headless:
             cmd.append('--headless=new')
-            # Headless mein aur optimization
             cmd.append('--disable-gpu-compositing')
             cmd.append('--disable-accelerated-layers')
         
@@ -372,7 +362,7 @@ class SmartHands:
         env['DISPLAY'] = ':99'
         env['CHROME_DEVEL_SANDBOX'] = ''
         env['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH', '')
-        env['NODE_OPTIONS'] = '--max-old-space-size=256'  # Node memory limit
+        env['NODE_OPTIONS'] = '--max-old-space-size=256'
         
         debug_file = open('chrome_debug.log', 'w')
         
@@ -387,8 +377,8 @@ class SmartHands:
                     env=env,
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 )
-                if self._wait_for_port(timeout=20):  # Timeout kam karo
-                    logger.info("✅ Chrome launched successfully! (Memory Optimized)")
+                if self._wait_for_port(timeout=20):
+                    logger.info("✅ Chrome launched successfully!")
                     self.metrics['launch_time'] = time.time()
                     debug_file.close()
                     return True
@@ -404,7 +394,6 @@ class SmartHands:
                 debug_file = open('chrome_debug.log', 'a')
             time.sleep(2)
         
-        # Final fallback: remote browser
         if self.cloud_browser_fallback:
             logger.warn("⚠️ Local launch failed, trying remote browser...")
             return self._connect_cloud_browser()
@@ -445,11 +434,11 @@ class SmartHands:
             return False
     
     # ============================================================
-    # 🔌 BYPASS 7: CONNECT (Self-Healing)
+    # 🔌 CONNECT
     # ============================================================
     def connect(self, retry=True):
         logger.info("="*60)
-        logger.info("🔌 CONNECTING TO BROWSER (KHATARNAK)")
+        logger.info("🔌 CONNECTING TO BROWSER")
         logger.info("="*60)
         self._load_session()
         if self._is_port_open():
@@ -479,7 +468,7 @@ class SmartHands:
                 self.is_connected = True
                 self.retry_count = 0
                 logger.info(f"✅ Connected! Page ID: {self.page_id}")
-                # ---- BYPASS 8: Bot Bypass ----
+                # Bot Bypass
                 bypass_js = [
                     'Object.defineProperty(navigator,"webdriver",{get:()=>undefined})',
                     'window.chrome={runtime:{},loadTimes:function(){}}',
@@ -701,8 +690,13 @@ class SmartHands:
         logger.info(f"✅ Found {len(tasks)} tasks.")
         return tasks
     
+    # ============================================================
+    # 🔑 MULTI-PLATFORM LOGIN FUNCTIONS
+    # ============================================================
+    
     def rapidworkers_login(self, email, password):
-        logger.info("🔑 Logging in...")
+        """🔑 RapidWorkers Login"""
+        logger.info("🔑 Logging into RapidWorkers...")
         for attempt in range(3):
             try:
                 self.navigate("https://rapidworkers.com")
@@ -717,13 +711,158 @@ class SmartHands:
                 self.human_delay(0.5, 2)
                 self.click_by_text("Next")
                 self.human_delay(3, 5)
-                logger.info("✅ Login successful!")
+                logger.info("✅ RapidWorkers Login successful!")
                 self._save_session()
                 return True
             except Exception as e:
-                logger.warn(f"⚠️ Login attempt {attempt+1} failed: {e}")
+                logger.warn(f"⚠️ RapidWorkers login attempt {attempt+1} failed: {e}")
                 self.human_delay(3, 6)
-        logger.error("❌ Login failed after 3 attempts.")
+        logger.error("❌ RapidWorkers login failed after 3 attempts.")
+        return False
+    
+    def timebucks_login(self, email, password):
+        """🔑 TimeBucks Login"""
+        logger.info("🔑 Logging into TimeBucks...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.timebucks.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Sign In")
+                self.human_delay(1, 2)
+                self.type_by_placeholder("Email", email)
+                self.human_delay(0.5, 1)
+                self.type_by_placeholder("Password", password)
+                self.human_delay(0.5, 1)
+                self.click_by_text("Login")
+                self.human_delay(3, 5)
+                logger.info("✅ TimeBucks Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ TimeBucks login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ TimeBucks login failed after 3 attempts.")
+        return False
+    
+    def freecash_login(self, email, password):
+        """🔑 Freecash Login"""
+        logger.info("🔑 Logging into Freecash...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.freecash.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Login")
+                self.human_delay(1, 2)
+                self.type_by_placeholder("Email", email)
+                self.type_by_placeholder("Password", password)
+                self.click_by_text("Log In")
+                self.human_delay(3, 5)
+                logger.info("✅ Freecash Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ Freecash login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ Freecash login failed after 3 attempts.")
+        return False
+    
+    def swagbucks_login(self, email, password):
+        """🔑 Swagbucks Login"""
+        logger.info("🔑 Logging into Swagbucks...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.swagbucks.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Sign In")
+                self.type_by_placeholder("Email", email)
+                self.type_by_placeholder("Password", password)
+                self.click_by_text("Log In")
+                self.human_delay(3, 5)
+                logger.info("✅ Swagbucks Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ Swagbucks login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ Swagbucks login failed after 3 attempts.")
+        return False
+    
+    def ysense_login(self, email, password):
+        """🔑 YSense Login"""
+        logger.info("🔑 Logging into YSense...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.ysense.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Log In")
+                self.type_by_placeholder("Email", email)
+                self.type_by_placeholder("Password", password)
+                self.click_by_text("Login")
+                self.human_delay(3, 5)
+                logger.info("✅ YSense Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ YSense login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ YSense login failed after 3 attempts.")
+        return False
+    
+    def prizerebel_login(self, email, password):
+        """🔑 PrizeRebel Login"""
+        logger.info("🔑 Logging into PrizeRebel...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.prizerebel.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Sign In")
+                self.type_by_placeholder("Email", email)
+                self.type_by_placeholder("Password", password)
+                self.click_by_text("Login")
+                self.human_delay(3, 5)
+                logger.info("✅ PrizeRebel Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ PrizeRebel login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ PrizeRebel login failed after 3 attempts.")
+        return False
+    
+    def grabpoints_login(self, email, password):
+        """🔑 GrabPoints Login"""
+        logger.info("🔑 Logging into GrabPoints...")
+        for attempt in range(3):
+            try:
+                self.navigate("https://www.grabpoints.com")
+                self.human_delay(2, 4)
+                self.click_by_text("Sign In")
+                self.type_by_placeholder("Email", email)
+                self.type_by_placeholder("Password", password)
+                self.click_by_text("Login")
+                self.human_delay(3, 5)
+                logger.info("✅ GrabPoints Login successful!")
+                self._save_session()
+                return True
+            except Exception as e:
+                logger.warn(f"⚠️ GrabPoints login attempt {attempt+1} failed: {e}")
+                self.human_delay(3, 6)
+        logger.error("❌ GrabPoints login failed after 3 attempts.")
+        return False
+    
+    def platform_login(self, platform, email, password):
+        """🔑 Generic platform login"""
+        logins = {
+            'rapidworkers': self.rapidworkers_login,
+            'timebucks': self.timebucks_login,
+            'freecash': self.freecash_login,
+            'swagbucks': self.swagbucks_login,
+            'ysense': self.ysense_login,
+            'prizerebel': self.prizerebel_login,
+            'grabpoints': self.grabpoints_login,
+        }
+        if platform in logins:
+            return logins[platform](email, password)
         return False
     
     # ============================================================
@@ -799,7 +938,7 @@ class SmartHands:
     # ============================================================
     def run(self, email, password, max_tasks=5, parallel=False, use_ai_scoring=False):
         logger.info("="*60)
-        logger.info("🚀 STARTING KHATARNAK ENGINE v13.0")
+        logger.info("🚀 STARTING KHATARNAK ENGINE v14.0")
         logger.info("="*60)
         if not self.connect():
             return "❌ Browser connection failed"
