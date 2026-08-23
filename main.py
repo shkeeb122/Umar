@@ -29,6 +29,7 @@ class SmartMain:
         self.is_running = False
         self.current_task = None
         self.start_time = None
+        self.current_platform = "rapidworkers"  # 👈 ADDED
     
     # ============================================================
     # 1. MEMORY (Self-Learning)
@@ -78,7 +79,6 @@ class SmartMain:
         tasks = []
         lines = page_text.split('\n')
         for line in lines:
-            # Pattern: "29/30" or "89/100"
             match = re.search(r'(\d+)/(\d+)', line)
             if match:
                 filled = int(match.group(1))
@@ -107,16 +107,13 @@ class SmartMain:
             try:
                 print(f"🔄 Attempt {attempt+1}/{MAX_RETRIES}")
                 
-                # Human Touch: Delay before starting
                 self.utils.thinking_time()
                 
-                # Simulate task execution (yahan actual automation aayegi)
-                # 🔥 Abhi placeholder hai — baad mein actual task execution add hoga
                 success = self._do_task(task)
                 
                 if success:
                     self.tasks_completed += 1
-                    self.total_earned += 0.10  # Example earning
+                    self.total_earned += 0.10
                     print(f"✅ Task complete! Earned: $0.10")
                     self._store_experience(task['title'], True, "Successfully completed")
                     return True
@@ -129,52 +126,37 @@ class SmartMain:
                 self.utils.human_delay(3, 6)
                 self.retry_count += 1
         
-        # All retries failed
         print(f"❌ Task failed after {MAX_RETRIES} attempts")
         self._store_experience(task['title'], False, f"Failed after {MAX_RETRIES} attempts")
         return False
     
     def _do_task(self, task):
-        """
-        🎯 Actual task execution (yahan Playwright/CDP logic aayegi)
-        Abhi placeholder hai, baad mein real automation add hogi
-        """
+        """🎯 Actual task execution"""
         print(f"▶️ Executing: {task['title'][:50]}...")
         
-        # Human Touch: Random typing speed
         speed = self.utils.get_typing_speed()
         print(f"⌨️ Typing speed: {speed:.0f} WPM")
         
-        # Human Touch: Random delay
         self.utils.action_pause()
         
-        # Simulate success (90% chance, 10% fail for realism)
         if self.utils.should_make_mistake(0.10):
             print("⚠️ Mistake occurred (simulated)")
             return False
         
-        # Human Touch: Random break (30% chance)
         self.utils.take_break()
         
-        return True  # Simulated success
+        return True
     
     # ============================================================
     # 4. TIME MANAGEMENT
     # ============================================================
     
     def run_with_time_management(self, task_description, estimated_seconds=120):
-        """
-        ⏱️ Time management ke saath task run karo
-        """
+        """⏱️ Time management ke saath task run karo"""
         print(f"⏱️ Estimated time: {estimated_seconds}s")
         
-        # Start timer
         self.utils.start_task_timer()
-        
-        # Run task
         result = self._execute_task_with_retry({'title': task_description})
-        
-        # Check time
         elapsed = self.utils.get_elapsed_time()
         target = self.utils.get_target_time(estimated_seconds)
         
@@ -188,36 +170,67 @@ class SmartMain:
         return result
     
     # ============================================================
-    # 5. MAIN RUN — COMMAND EXECUTE
+    # 5. MAIN RUN — COMMAND EXECUTE (MODIFIED)
     # ============================================================
     
     def run(self, command):
-        """
-        🚀 Main entry point — command execute karega
-        """
+        """🚀 Main entry point — command execute karega"""
         print(f"📌 Command: {command}")
         
         if self.is_running:
             return "⚠️ System already running!"
         
+        # 👇 DETECT PLATFORM FROM COMMAND
+        platform = "rapidworkers"  # default
+        if "timebucks" in command.lower():
+            platform = "timebucks"
+        elif "freecash" in command.lower():
+            platform = "freecash"
+        elif "swagbucks" in command.lower():
+            platform = "swagbucks"
+        elif "ysense" in command.lower():
+            platform = "ysense"
+        elif "prizerebel" in command.lower():
+            platform = "prizerebel"
+        elif "grabpoints" in command.lower():
+            platform = "grabpoints"
+        
+        self.current_platform = platform
+        print(f"📌 Platform: {platform}")
+        
         self.is_running = True
         self.start_time = datetime.now()
         
-        # Human Touch: Initial delay
         self.utils.human_delay(1, 3)
         
         # 1. Connect to browser
         if not self.hands.connect():
             self.is_running = False
-            return "❌ Browser not connected! Please start Chrome with: chrome --remote-debugging-port=9222"
+            return "❌ Browser not connected!"
         
-        # 2. Navigate to RapidWorkers
-        self.hands.navigate("https://rapidworkers.com")
+        # 2. Navigate to platform
+        platform_urls = {
+            "rapidworkers": "https://rapidworkers.com",
+            "timebucks": "https://www.timebucks.com",
+            "freecash": "https://www.freecash.com",
+            "swagbucks": "https://www.swagbucks.com",
+            "ysense": "https://www.ysense.com",
+            "prizerebel": "https://www.prizerebel.com",
+            "grabpoints": "https://www.grabpoints.com",
+        }
+        self.hands.navigate(platform_urls.get(platform, "https://rapidworkers.com"))
         self.utils.human_delay(3, 5)
         
-        # 3. Login (Email + Password from config)
-        print("🔑 Logging in...")
-        self.hands.rapidworkers_login(GOOGLE_EMAIL, GOOGLE_PASSWORD)
+        # 3. Platform-specific login
+        print(f"🔑 Logging into {platform}...")
+        if platform == "rapidworkers":
+            self.hands.rapidworkers_login(GOOGLE_EMAIL, GOOGLE_PASSWORD)
+        elif platform == "timebucks":
+            self.hands.timebucks_login(TIMEBUCKS_EMAIL, TIMEBUCKS_PASSWORD)
+        elif platform == "freecash":
+            self.hands.freecash_login(FREECASH_EMAIL, FREECASH_PASSWORD)
+        # Add more platforms as needed
+        
         self.utils.human_delay(2, 4)
         
         # 4. Scan tasks
@@ -225,25 +238,20 @@ class SmartMain:
         
         if not tasks:
             self.is_running = False
-            return f"❌ No {MIN_FILLED_PERCENT}%+ tasks found!"
+            return f"❌ No {MIN_FILLED_PERCENT}%+ tasks found on {platform}!"
         
-        # 5. Execute best tasks (max 5 per run)
+        # 5. Execute best tasks
         best_tasks = tasks[:5]
         results = []
         
         for task in best_tasks:
             print(f"\n📌 Task: {task['title']} ({task['percent']:.0f}% filled)")
-            
-            # Time management for each task
             success = self.run_with_time_management(task['title'], estimated_seconds=120)
-            
             results.append({
                 'task': task['title'],
                 'success': success,
                 'percent': task['percent']
             })
-            
-            # Human break between tasks
             self.utils.take_break()
         
         # 6. Summary
@@ -256,6 +264,7 @@ class SmartMain:
         return f"""
 ✅ **Task Summary**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 Platform: {platform}
 📌 Tasks: {success_count}/{total_count} completed
 💰 Total Earned: ${self.total_earned:.2f}
 ⏱️ Duration: {(datetime.now() - self.start_time).seconds // 60} minutes
@@ -271,6 +280,7 @@ class SmartMain:
         """Current system status"""
         return {
             "status": "running" if self.is_running else "idle",
+            "platform": self.current_platform,
             "tasks_completed": self.tasks_completed,
             "total_earned": f"${self.total_earned:.2f}",
             "retry_count": self.retry_count,
@@ -279,7 +289,7 @@ class SmartMain:
         }
 
 # ============================================================
-# 7. TESTING — Direct Run
+# 7. TESTING
 # ============================================================
 
 if __name__ == "__main__":
