@@ -144,17 +144,22 @@ INTENT_REGISTRY = {
     },
 
     # ============================================================
-    # 🆕 SMART WEBSITE MASTER INTENTS (NEW - ADDED)
+    # 🆕 SMART WEBSITE MASTER INTENTS (UPDATED)
     # ============================================================
     "smart_task": {
         "keywords": [
             "rapidworker", "task karo", "kaam karo", "automation start",
-            "rapid pe jao", "task start", "kaam shuru", "rapidworker start"
+            "rapid pe jao", "task start", "kaam shuru", "rapidworker start",
+            # 👇 NEW KEYWORDS ADDED
+            "task", "auto", "start automation", "automation",
+            "rapid workers", "micro task", "earn money",
+            "timebucks", "freecash", "swagbucks", "ysense",
+            "work start", "job start", "earning start"
         ],
         "handler": "handle_smart_task",
         "priority": 2,
-        "description": "RapidWorkers Automation Trigger (Smart)",
-        "example": "RapidWorker pe jao, task karo"
+        "description": "Automation Trigger for any platform",
+        "example": "Task start karo"
     },
     "smart_open": {
         "keywords": [
@@ -169,7 +174,11 @@ INTENT_REGISTRY = {
     "smart_status": {
         "keywords": [
             "status", "kya chal raha", "haal", "progress",
-            "kitna hua", "report", "update"
+            "kitna hua", "report", "update",
+            # 👇 NEW KEYWORDS ADDED
+            "earning", "kamaai", "tasks done", "progress report",
+            "how many tasks", "kitne task", "balance",
+            "show status", "current status"
         ],
         "handler": "handle_smart_status",
         "priority": 2,
@@ -281,19 +290,37 @@ def handle_summarize(message, history, all_history, campaign_id=None, **kwargs):
 
 
 # ============================================================
-# 🆕 SMART WEBSITE MASTER HANDLERS (NEW - FIXED)
+# 🆕 SMART WEBSITE MASTER HANDLERS (UPDATED)
 # ============================================================
 
 def handle_smart_task(message, history, all_history, campaign_id=None, **kwargs):
     """
-    🚀 Smart Website Master - Automation Trigger
+    🚀 Smart Automation Trigger — Any platform
     Calls SmartMain orchestrator from main.py
     """
     try:
-        from main import SmartMain  # ✅ FIXED: SmartMain, not MainOrchestrator
+        from main import SmartMain
         system = SmartMain()
-        result = system.run(message)
+        
+        # Detect platform from message
+        platform = "rapidworkers"  # default
+        if "timebucks" in message.lower():
+            platform = "timebucks"
+        elif "freecash" in message.lower():
+            platform = "freecash"
+        elif "swagbucks" in message.lower():
+            platform = "swagbucks"
+        elif "ysense" in message.lower():
+            platform = "ysense"
+        elif "prizerebel" in message.lower():
+            platform = "prizerebel"
+        elif "grabpoints" in message.lower():
+            platform = "grabpoints"
+        
+        # Run automation
+        result = system.run(f"{platform} task")
         return result
+        
     except ImportError as e:
         return f"⚠️ SmartMain not found. Please ensure main.py is present. Error: {e}"
     except Exception as e:
@@ -316,6 +343,12 @@ def handle_smart_open(message, history, all_history, campaign_id=None, **kwargs)
         return "🌐 Opening: https://youtube.com"
     elif 'facebook' in message.lower():
         return "🌐 Opening: https://facebook.com"
+    elif 'rapidworkers' in message.lower():
+        return "🌐 Opening: https://rapidworkers.com"
+    elif 'timebucks' in message.lower():
+        return "🌐 Opening: https://timebucks.com"
+    elif 'github' in message.lower():
+        return "🌐 Opening: https://github.com"
     return "🌐 Please specify a website URL"
 
 
@@ -324,11 +357,11 @@ def handle_smart_status(message, history, all_history, campaign_id=None, **kwarg
     📊 Smart Website Master - System Status Handler
     """
     try:
-        from main import SmartMain  # ✅ FIXED: SmartMain, not MainOrchestrator
+        from main import SmartMain
         system = SmartMain()
         status = system.get_status()
         return f"""
-📊 **Smart Website Master Status**
+📊 **System Status**
 ━━━━━━━━━━━━━━━━━━━━
 📌 Status: {status.get('status', 'idle')}
 ✅ Tasks Done: {status.get('tasks_completed', 0)}
@@ -337,15 +370,16 @@ def handle_smart_status(message, history, all_history, campaign_id=None, **kwarg
 📚 Memory: {status.get('memory_size', 0)} tasks
 ━━━━━━━━━━━━━━━━━━━━
 """
-    except:
-        return """
-📊 **Smart Website Master Status**
+    except Exception as e:
+        return f"""
+📊 **System Status**
 ━━━━━━━━━━━━━━━━━━━━
 📌 Status: Idle
 ✅ Tasks Done: 0
 💰 Earning: $0.00
 ⏱️ Uptime: 0 minutes
 ━━━━━━━━━━━━━━━━━━━━
+⚠️ Error: {str(e)}
 """
 
 
@@ -353,7 +387,7 @@ def handle_smart_stop(message, history, all_history, campaign_id=None, **kwargs)
     """
     🛑 Smart Website Master - Stop Handler
     """
-    return "🛑 Automation stopped! (Smart Website Master will stop after current task.)"
+    return "🛑 Automation stopped! (System will stop after current task.)"
 
 
 # ============================================================
