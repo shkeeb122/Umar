@@ -20,7 +20,7 @@ class SmartUtils:
         self.actions = 0
     
     # ============================================================
-    # 1. HUMAN DELAYS (सोचने का समय)
+    # 1. HUMAN DELAYS
     # ============================================================
     
     def human_delay(self, min_sec=HUMAN_DELAY_MIN, max_sec=HUMAN_DELAY_MAX):
@@ -38,7 +38,7 @@ class SmartUtils:
         return self.human_delay(0.5, 2)
     
     # ============================================================
-    # 2. HUMAN TYPING (इंसानी टाइपिंग)
+    # 2. HUMAN TYPING
     # ============================================================
     
     def get_typing_speed(self):
@@ -46,27 +46,21 @@ class SmartUtils:
         return random.uniform(TYPING_SPEED_MIN, TYPING_SPEED_MAX)
     
     def human_type(self, text, speed_wpm=None):
-        """
-        Human-like typing with random speed + typos
-        """
+        """Human-like typing with random speed + typos"""
         if speed_wpm is None:
             speed_wpm = self.get_typing_speed()
         
-        # Convert WPM to characters per second
         chars_per_sec = speed_wpm * 5 / 60
         base_delay = 1 / chars_per_sec if chars_per_sec > 0 else 0.05
         
         typed_text = ""
         for char in text:
-            # Random speed variation (50-150% of base)
             delay = base_delay * random.uniform(0.5, 1.5)
             time.sleep(delay)
             
-            # Typos (12% chance)
             if random.random() < MISTAKE_RATE:
                 wrong_char = chr(ord(char) + random.randint(-3, 3))
                 typed_text += wrong_char
-                # Correct typo
                 time.sleep(delay * 1.5)
                 typed_text += char
                 continue
@@ -76,31 +70,88 @@ class SmartUtils:
         return typed_text
     
     # ============================================================
-    # 3. HUMAN MOUSE (इंसानी माउस)
+    # 3. HUMAN MOUSE (UPDATED)
     # ============================================================
     
     def human_mouse_move(self, hands, target_x, target_y):
-        """Human-like mouse movement (curved path)"""
-        # Get current position (simulated)
-        current_x, current_y = 0, 0  # Will be replaced with actual JS
+        """Human-like mouse movement with bezier curve"""
+        try:
+            # Get current position
+            result = hands.send_command("Runtime.evaluate", {
+                "expression": "window.scrollX, window.scrollY"
+            })
+            vals = result.get('result', {}).get('result', {}).get('value', '0,0').split(',')
+            start_x = float(vals[0]) + random.randint(100, 300)
+            start_y = float(vals[1]) + random.randint(100, 300)
+        except:
+            start_x, start_y = 200, 200
         
-        # Generate bezier curve points
         steps = random.randint(15, 30)
         for i in range(steps):
             t = i / steps
-            # Bezier with random control points
-            cx = random.randint(-100, 100)
-            cy = random.randint(-100, 100)
-            x = (1-t)**3 * current_x + 3*(1-t)**2*t * (current_x+cx) + 3*(1-t)*t**2 * (target_x+cx) + t**3 * target_x
-            y = (1-t)**3 * current_y + 3*(1-t)**2*t * (current_y+cy) + 3*(1-t)*t**2 * (target_y+cy) + t**3 * target_y
-            # Send mouse move command via JS
+            cx1 = random.randint(-100, 100)
+            cy1 = random.randint(-100, 100)
+            cx2 = random.randint(-100, 100)
+            cy2 = random.randint(-100, 100)
+            x = (1-t)**3 * start_x + 3*(1-t)**2*t * (start_x+cx1) + 3*(1-t)*t**2 * (target_x+cx2) + t**3 * target_x
+            y = (1-t)**3 * start_y + 3*(1-t)**2*t * (start_y+cy1) + 3*(1-t)*t**2 * (target_y+cy2) + t**3 * target_y
             hands.send_command("Runtime.evaluate", {
-                "expression": f"window.scrollTo({int(x)}, {int(y)})"
+                "expression": f"""
+                var ev = new MouseEvent('mousemove', {{clientX:{int(x)}, clientY:{int(y)}, bubbles:true}});
+                document.dispatchEvent(ev);
+                """
             })
             time.sleep(random.uniform(0.002, 0.01))
     
     # ============================================================
-    # 4. TIME MANAGEMENT (समय प्रबंधन)
+    # 4. HUMAN SCROLL (NEW)
+    # ============================================================
+    
+    def human_scroll(self, hands, direction='down', times=None):
+        """Human-like scrolling with random patterns"""
+        if times is None:
+            times = random.randint(3, 8)
+        for _ in range(times):
+            pixels = random.randint(100, 300)
+            sign = 1 if direction == 'down' else -1
+            hands.send_command("Runtime.evaluate", {
+                "expression": f"window.scrollBy(0, {sign*pixels})"
+            })
+            time.sleep(random.uniform(0.2, 0.8))
+    
+    # ============================================================
+    # 5. HUMAN CLICK (NEW)
+    # ============================================================
+    
+    def human_click(self, hands, selector):
+        """Human-like click with random delay and movement"""
+        # Wait random time before click
+        time.sleep(random.uniform(0.3, 1.0))
+        
+        # Get element position
+        result = hands.send_command("Runtime.evaluate", {
+            "expression": f"""
+            var el = document.querySelector('{selector}');
+            if(el) {{
+                var rect = el.getBoundingClientRect();
+                return {{x: rect.left + rect.width/2, y: rect.top + rect.height/2}};
+            }}
+            return null;
+            """
+        })
+        
+        if result and 'result' in result:
+            pos = result['result'].get('result', {}).get('value')
+            if pos:
+                # Move mouse to element (human-like)
+                self.human_mouse_move(hands, pos['x'], pos['y'])
+        
+        # Click with random delay
+        time.sleep(random.uniform(0.1, 0.3))
+        hands.click(selector)
+    
+    # ============================================================
+    # 6. TIME MANAGEMENT
     # ============================================================
     
     def start_task_timer(self):
@@ -116,19 +167,13 @@ class SmartUtils:
         return 0
     
     def get_target_time(self, estimated_seconds):
-        """
-        🎯 Target time calculate karo (Human Speed)
-        Example: 2 min task = 1 min 42 sec
-        """
+        """🎯 Target time calculate karo (Human Speed)"""
         buffer_time = estimated_seconds * (1 - TIME_BUFFER_PERCENT)
-        # Add some random variation (90-110%)
         target_time = buffer_time * random.uniform(0.9, 1.1)
         return max(MIN_TASK_TIME, min(MAX_TASK_TIME, target_time))
     
     def wait_for_target(self, estimated_seconds):
-        """
-        ⏱️ Target time ke hisaab se wait karo
-        """
+        """⏱️ Target time ke hisaab se wait karo"""
         target = self.get_target_time(estimated_seconds)
         elapsed = self.get_elapsed_time()
         
@@ -140,9 +185,7 @@ class SmartUtils:
         return False
     
     def track_time(self, estimated_seconds):
-        """
-        📊 Time track karo aur report do
-        """
+        """📊 Time track karo aur report do"""
         self.start_task_timer()
         elapsed = self.get_elapsed_time()
         target = self.get_target_time(estimated_seconds)
@@ -154,7 +197,7 @@ class SmartUtils:
         }
     
     # ============================================================
-    # 5. HUMAN BREAKS (आराम)
+    # 7. HUMAN BREAKS
     # ============================================================
     
     def take_break(self, chance=BREAK_CHANCE):
@@ -167,7 +210,7 @@ class SmartUtils:
         return False
     
     # ============================================================
-    # 6. HUMAN MISTAKES (गलतियाँ)
+    # 8. HUMAN MISTAKES
     # ============================================================
     
     def should_make_mistake(self, chance=MISTAKE_RATE):
@@ -179,7 +222,7 @@ class SmartUtils:
         return random.random() < chance
     
     # ============================================================
-    # 7. UTILITIES (मददगार फंक्शन्स)
+    # 9. UTILITIES
     # ============================================================
     
     def random_element(self, elements):
