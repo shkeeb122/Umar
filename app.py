@@ -622,6 +622,84 @@ def automation_command():
 
 
 # ============================================================
+# 🔥 EXTENSION CONNECTION ROUTES (NEW ADDED)
+# ============================================================
+
+@app.route("/task/start", methods=["POST"])
+def task_start():
+    """
+    📌 ROUTE: Extension se task start command
+    📝 PURPOSE: Extension "task start" command handle karega
+    """
+    try:
+        data = request.json or {}
+        command = data.get("command", "task start")
+        
+        # Get orchestrator
+        orchestrator = get_orchestrator()
+        
+        # Run automation in background
+        def run_task():
+            orchestrator.run(command)
+        
+        thread = threading.Thread(target=run_task)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": "✅ Task started!",
+            "status": "running"
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/task/stop", methods=["POST"])
+def task_stop():
+    """
+    📌 ROUTE: Extension se task stop command
+    """
+    try:
+        global _orchestrator_running
+        _orchestrator_running = False
+        return jsonify({
+            "success": True,
+            "message": "⏹ Task stopped!"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/task/status", methods=["GET"])
+def task_status():
+    """
+    📌 ROUTE: Extension se status check
+    """
+    try:
+        orchestrator = get_orchestrator()
+        status = orchestrator.get_status() if hasattr(orchestrator, 'get_status') else {"status": "idle"}
+        return jsonify({
+            "success": True,
+            "status": status.get("status", "idle"),
+            "tasks_completed": status.get("tasks_completed", 0),
+            "total_earned": status.get("total_earned", 0)
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# ============================================================
 # 🔥 NEW ROUTE TEMPLATE - Naya route add karne ke liye
 # ============================================================
 # 📋 Copy-paste this template to add new route:
@@ -661,7 +739,7 @@ def new_route():
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=10000, debug=False)  # 🔥 MODIFIED: Port 5000 → 10000
 
 
 # ====================================================================================================
