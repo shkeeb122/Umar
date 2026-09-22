@@ -9,7 +9,7 @@ import os
 # ================= 1. MISTRAL AI =================
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
-MODEL_NAME = "mistral-small-latest"
+MODEL_NAME = "ministral-8b-latest"  # 🔥 CHANGED: mistral-small-latest → ministral-8b-latest
 
 HEADERS = {
     "Authorization": f"Bearer {MISTRAL_API_KEY}",
