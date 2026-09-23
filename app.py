@@ -1,39 +1,49 @@
 # ====================================================================================================
-# 📁 FILE: app.py - SMART SYSTEM DESIGN
-# 🎯 ROLE: BOSS - Route Handler + API Server
-# 🔥 VERSION: 7.1 - KIWI EXTENSION BRIDGE + SEARCH FIX
-# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# 📁 FILE: app.py
+# 🎯 ROLE: BOSS - Route Handler + API Server + Browser Automation Controller
+# 🔥 VERSION: 8.0
 #
 # ARCHITECTURE:
 #
 # User / Vercel
-#      ↓
+#       ↓
 # Render Flask
-#      ↓
+#       ↓
 # AI Service
-#      ↓
-# Extension Test Bridge
-#      ↓
+#       ↓
+# Persistent Automation Controller
+#       ↓
+# SQLite Command Queue
+#       ↓
 # Kiwi Extension
-#      ↓
-# Browser
-#      ↓
+#       ↓
+# Browser / Website
+#       ↓
+# content.js
+#       ↓
 # Kiwi Extension
-#      ↓
+#       ↓
 # Render
+#       ↓
+# AI / Orchestrator
 #
-# EXISTING ROUTES:
-#    PRESERVED
-#
-# EXTENSION BRIDGE:
-#    open
-#    search
+# IMPORTANT:
+# - Existing chat/campaign/blog routes preserved
+# - Existing task/automation routes preserved
+# - Kiwi bridge upgraded
+# - Persistent command queue added
+# - Command history added
+# - Extension registration/heartbeat added
+# - Result persistence added
+# - Retry support added
+# - Session/checkpoint foundation added
+# - open/search/scan/detect/find/click/type/extract/page_info/wait supported
 #
 # ====================================================================================================
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 1: IMPORTS
+# 1. IMPORTS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 from flask import Flask, request, jsonify
@@ -46,8 +56,12 @@ import os
 import sqlite3
 import threading
 import secrets
+import json
+import traceback
+import re
 
 
+# Existing project modules
 from config import BACKEND_URL
 from db import *
 from helpers import *
@@ -55,52 +69,444 @@ from ai_service import detect_intent, generate_response, ai_chat
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 2: APP SETUP (🔒 PRESERVED)
+# 2. APP SETUP
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
+
 CORS(app)
 
+# Existing DB initialization
 init_db()
 
+# Legacy compatibility
 cursor = get_cursor()
 
 start_time = time.time()
 
 
-# Global orchestrator instance
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 3. GLOBAL ORCHESTRATOR
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
 _orchestrator = None
 _orchestrator_thread = None
 _orchestrator_running = False
 
+_orchestrator_lock = threading.Lock()
+
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 3: CONTROLLERS / HELPERS
+# 4. EXTENSION CONFIGURATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
+EXTENSION_TEST_TOKEN = os.getenv("EXTENSION_TEST_TOKEN", "").strip()
 
-def check_database():
-    """Check if database is accessible"""
+if not EXTENSION_TEST_TOKEN:
+
+    # Development fallback only.
+    # Production Render mein Environment Variable zaroor set karo.
+    EXTENSION_TEST_TOKEN = secrets.token_urlsafe(32)
+
+    print(
+        "⚠️ WARNING: EXTENSION_TEST_TOKEN environment variable "
+        "not found. Temporary development token generated."
+    )
+
+
+EXTENSION_COMMAND_TIMEOUT = int(
+    os.getenv("EXTENSION_COMMAND_TIMEOUT", "45")
+)
+
+EXTENSION_MAX_RETRIES = int(
+    os.getenv("EXTENSION_MAX_RETRIES", "3")
+)
+
+EXTENSION_HEARTBEAT_TIMEOUT = int(
+    os.getenv("EXTENSION_HEARTBEAT_TIMEOUT", "120")
+)
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 5. SQLITE CONFIGURATION
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+DB_PATH = "ai_system.db"
+
+DB_TIMEOUT = 30
+
+
+def db_connect():
+
+    """
+    Har operation ke liye independent SQLite connection.
+
+    Isse Flask ke multiple threads mein
+    shared connection problems kam hoti hain.
+    """
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=DB_TIMEOUT
+    )
+
+    conn.row_factory = sqlite3.Row
 
     try:
 
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
+        conn.execute(
+            "PRAGMA journal_mode=WAL"
+        )
+
+        conn.execute(
+            "PRAGMA busy_timeout=30000"
+        )
+
+        conn.execute(
+            "PRAGMA foreign_keys=ON"
+        )
+
+    except Exception:
+        pass
+
+    return conn
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 6. ADVANCED BRIDGE DATABASE TABLES
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def init_bridge_database():
+
+    """
+    Advanced browser bridge ke liye extra tables.
+
+    Existing campaigns/messages/posts ko touch nahi karta.
+    """
+
+    conn = db_connect()
+
+    try:
+
+        # ---------------------------------------------------------------------------------------------
+        # BRIDGE COMMANDS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bridge_commands (
+
+                command_id TEXT PRIMARY KEY,
+
+                session_id TEXT,
+
+                action TEXT NOT NULL,
+
+                payload_json TEXT,
+
+                status TEXT DEFAULT 'queued',
+
+                priority INTEGER DEFAULT 5,
+
+                attempts INTEGER DEFAULT 0,
+
+                max_attempts INTEGER DEFAULT 3,
+
+                available_at TEXT,
+
+                locked_at TEXT,
+
+                completed_at TEXT,
+
+                created_at TEXT NOT NULL,
+
+                updated_at TEXT,
+
+                result_id TEXT,
+
+                error TEXT
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # BRIDGE RESULTS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bridge_results (
+
+                result_id TEXT PRIMARY KEY,
+
+                command_id TEXT,
+
+                session_id TEXT,
+
+                action TEXT,
+
+                success INTEGER DEFAULT 0,
+
+                result_json TEXT,
+
+                error TEXT,
+
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # EXTENSION REGISTRATIONS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS extension_registrations (
+
+                extension_id TEXT PRIMARY KEY,
+
+                extension_name TEXT,
+
+                extension_version TEXT,
+
+                browser TEXT,
+
+                capabilities_json TEXT,
+
+                registered_at TEXT,
+
+                last_seen TEXT,
+
+                disconnected_at TEXT
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # AUTOMATION SESSIONS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS automation_sessions (
+
+                session_id TEXT PRIMARY KEY,
+
+                status TEXT DEFAULT 'RUNNING',
+
+                title TEXT,
+
+                user_command TEXT,
+
+                plan_json TEXT,
+
+                current_step INTEGER DEFAULT 0,
+
+                current_action TEXT,
+
+                current_url TEXT,
+
+                last_result_json TEXT,
+
+                checkpoint_json TEXT,
+
+                last_error TEXT,
+
+                retry_count INTEGER DEFAULT 0,
+
+                max_retries INTEGER DEFAULT 3,
+
+                pause_reason TEXT,
+
+                extension_id TEXT,
+
+                created_at TEXT NOT NULL,
+
+                updated_at TEXT NOT NULL,
+
+                completed_at TEXT
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # AUTOMATION STEPS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS automation_steps (
+
+                step_id TEXT PRIMARY KEY,
+
+                session_id TEXT NOT NULL,
+
+                sequence INTEGER NOT NULL,
+
+                action TEXT NOT NULL,
+
+                target TEXT,
+
+                input_json TEXT,
+
+                status TEXT DEFAULT 'pending',
+
+                attempt_count INTEGER DEFAULT 0,
+
+                max_attempts INTEGER DEFAULT 3,
+
+                result_json TEXT,
+
+                error TEXT,
+
+                started_at TEXT,
+
+                completed_at TEXT
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # CHECKPOINTS
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS automation_checkpoints (
+
+                checkpoint_id TEXT PRIMARY KEY,
+
+                session_id TEXT NOT NULL,
+
+                current_step INTEGER DEFAULT 0,
+
+                current_action TEXT,
+
+                current_url TEXT,
+
+                snapshot_json TEXT,
+
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # ---------------------------------------------------------------------------------------------
+        # INDEXES
+        # ---------------------------------------------------------------------------------------------
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bridge_commands_status
+            ON bridge_commands(status, priority, created_at)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bridge_commands_session
+            ON bridge_commands(session_id)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bridge_results_command
+            ON bridge_results(command_id)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_status
+            ON automation_sessions(status)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_steps_session
+            ON automation_steps(session_id, sequence)
+        """)
+
+        conn.commit()
+
+        print("✅ Advanced bridge database ready!")
+
+    except Exception as e:
+
+        conn.rollback()
+
+        print(
+            f"❌ Bridge DB initialization error: {e}"
+        )
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+init_bridge_database()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 7. JSON HELPERS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def json_dumps_safe(value):
+
+    try:
+
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            default=str
+        )
+
+    except Exception:
+
+        return json.dumps(
+            str(value),
+            ensure_ascii=False
+        )
+
+
+def json_loads_safe(value, default=None):
+
+    if value is None:
+        return default
+
+    try:
+        return json.loads(value)
+
+    except Exception:
+        return default
+
+
+def now_iso():
+
+    return datetime.now().isoformat()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 8. BASIC SYSTEM HELPERS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def check_database():
+
+    try:
+
+        conn = db_connect()
+
+        conn.execute(
+            "SELECT 1"
+        ).fetchone()
+
+        conn.close()
 
         return True, "connected"
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"❌ Database check error: {e}"
+        )
 
         return False, "disconnected"
 
 
 def get_uptime():
-    """Get server uptime in seconds"""
 
     return int(
         time.time() - start_time
     )
 
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 9. SAFE BATCH MESSAGE WRITE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def save_messages_batch(
     campaign_id,
@@ -109,31 +515,18 @@ def save_messages_batch(
     is_ques,
     now
 ):
-    """
-    Batch write:
-    User message
-    Assistant message
-    Campaign update
 
-    All in one transaction.
-    """
-
-    conn = sqlite3.connect(
-        "ai_system.db"
-    )
-
-    c = conn.cursor()
+    conn = db_connect()
 
     try:
 
-        # ------------------------------------------------
-        # 1. USER MESSAGE
-        # ------------------------------------------------
-
-        c.execute(
-            "INSERT INTO messages "
-            "(id, campaign_id, role, content, is_question, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+        # USER
+        conn.execute(
+            """
+            INSERT INTO messages
+            (id, campaign_id, role, content, is_question, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
             (
                 str(uuid.uuid4()),
                 campaign_id,
@@ -144,14 +537,13 @@ def save_messages_batch(
             )
         )
 
-        # ------------------------------------------------
-        # 2. ASSISTANT MESSAGE
-        # ------------------------------------------------
-
-        c.execute(
-            "INSERT INTO messages "
-            "(id, campaign_id, role, content, is_question, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+        # ASSISTANT
+        conn.execute(
+            """
+            INSERT INTO messages
+            (id, campaign_id, role, content, is_question, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
             (
                 str(uuid.uuid4()),
                 campaign_id,
@@ -162,24 +554,33 @@ def save_messages_batch(
             )
         )
 
-        # ------------------------------------------------
-        # 3. QUESTION COUNT
-        # ------------------------------------------------
+        # Question count same transaction mein.
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM messages
+            WHERE campaign_id=?
+            AND role='user'
+            AND is_question=1
+            """,
+            (campaign_id,)
+        ).fetchone()
 
-        new_count = count_questions(
-            campaign_id
+        new_count = int(
+            row[0]
+            if row
+            else 0
         )
 
-        # ------------------------------------------------
-        # 4. CAMPAIGN UPDATE
-        # ------------------------------------------------
-
-        c.execute(
-            "UPDATE campaigns "
-            "SET updated_at=?, "
-            "message_count=message_count+2, "
-            "question_count=? "
-            "WHERE id=?",
+        conn.execute(
+            """
+            UPDATE campaigns
+            SET
+                updated_at=?,
+                message_count=message_count+2,
+                question_count=?
+            WHERE id=?
+            """,
             (
                 now,
                 new_count,
@@ -203,35 +604,38 @@ def save_messages_batch(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# ORCHESTRATOR
+# 10. ORCHESTRATOR
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-
 def get_orchestrator():
-    """Get or create SmartMain orchestrator instance"""
 
     global _orchestrator
 
-    if _orchestrator is None:
+    with _orchestrator_lock:
 
-        from main import SmartMain
+        if _orchestrator is None:
 
-        _orchestrator = SmartMain()
+            from main import SmartMain
 
-    return _orchestrator
+            _orchestrator = SmartMain()
+
+        return _orchestrator
 
 
-def run_orchestrator_async():
-    """Run orchestrator in background thread"""
+def run_orchestrator_async(
+    command_value="RapidWorker pe jao, task karo"
+):
 
     global _orchestrator_running
     global _orchestrator_thread
 
-    if _orchestrator_running:
+    with _orchestrator_lock:
 
-        return
+        if _orchestrator_running:
 
-    _orchestrator_running = True
+            return False
+
+        _orchestrator_running = True
 
     orchestrator = get_orchestrator()
 
@@ -242,7 +646,7 @@ def run_orchestrator_async():
         try:
 
             orchestrator.run(
-                "RapidWorker pe jao, task karo"
+                command_value
             )
 
         except Exception as e:
@@ -250,6 +654,8 @@ def run_orchestrator_async():
             print(
                 f"❌ Orchestrator error: {e}"
             )
+
+            traceback.print_exc()
 
         finally:
 
@@ -262,78 +668,18 @@ def run_orchestrator_async():
 
     _orchestrator_thread.start()
 
-
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# 🧪 EXTENSION TEST BRIDGE CONTROLLER
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-#
-# Supported bridge actions:
-#
-#    open
-#    search
-#
-# ====================================================================================================
-
-
-# ----------------------------------------------------------------------------------------------------
-# EXTENSION TEST TOKEN
-# ----------------------------------------------------------------------------------------------------
-
-EXTENSION_TEST_TOKEN = os.getenv(
-    "EXTENSION_TEST_TOKEN"
-)
-
-# Development fallback.
-# Production mein Render Environment Variable use karo.
-if not EXTENSION_TEST_TOKEN:
-
-    EXTENSION_TEST_TOKEN = secrets.token_urlsafe(
-        32
-    )
-
-
-# ----------------------------------------------------------------------------------------------------
-# SHARED EXTENSION STATE
-# ----------------------------------------------------------------------------------------------------
-
-_extension_test_state = {
-
-    "registered": False,
-
-    "extension_id": None,
-
-    "registered_at": None,
-
-    "pending_command": None,
-
-    "last_result": None,
-
-    "last_command_at": None,
-
-    "last_result_at": None,
-
-    # Latest command ID.
-    # Isse result matching aur debugging better hoti hai.
-    "last_command_id": None
-}
-
-
-# Thread lock
-_extension_test_lock = threading.Lock()
+    return True
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# EXTENSION AUTH
+# 11. EXTENSION AUTHENTICATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 def extension_test_authorized():
-    """
-    Check whether request contains correct extension test token.
-    """
 
     supplied_token = request.headers.get(
-        "X-Extension-Test-Token"
+        "X-Extension-Test-Token",
+        ""
     )
 
     if not supplied_token:
@@ -353,85 +699,34 @@ def extension_test_authorized():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# EXTENSION STATE SNAPSHOT
+# 12. BRIDGE NORMALIZATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
+SUPPORTED_BRIDGE_ACTIONS = [
 
-def extension_test_state_snapshot():
-    """
-    Safe copy of bridge state.
-
-    Secret token kabhi response mein nahi bheja jayega.
-    """
-
-    with _extension_test_lock:
-
-        pending = (
-            _extension_test_state[
-                "pending_command"
-            ]
-            is not None
-        )
-
-        return {
-
-            "registered":
-                _extension_test_state[
-                    "registered"
-                ],
-
-            "extension_id":
-                _extension_test_state[
-                    "extension_id"
-                ],
-
-            "registered_at":
-                _extension_test_state[
-                    "registered_at"
-                ],
-
-            "pending_command":
-                pending,
-
-            "last_command_at":
-                _extension_test_state[
-                    "last_command_at"
-                ],
-
-            "last_command_id":
-                _extension_test_state[
-                    "last_command_id"
-                ],
-
-            "last_result":
-                _extension_test_state[
-                    "last_result"
-                ],
-
-            "last_result_at":
-                _extension_test_state[
-                    "last_result_at"
-                ]
-        }
-
-
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE COMMAND HELPERS
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+    "open",
+    "search",
+    "scan",
+    "detect",
+    "find",
+    "find_element",
+    "click",
+    "click_by_text",
+    "type",
+    "extract",
+    "extract_text",
+    "page_info",
+    "wait_text",
+    "wait_for_text",
+    "wait_selector",
+    "wait_for_selector",
+    "screenshot",
+    "status",
+    "stop"
+]
 
 
 def normalize_bridge_action(action):
-    """
-    Normalize bridge action.
-
-    Example:
-        SEARCH
-        search
-        Search
-
-    Sab:
-        search
-    """
 
     if action is None:
 
@@ -443,9 +738,6 @@ def normalize_bridge_action(action):
 
 
 def normalize_search_engine(engine):
-    """
-    Normalize supported search engine.
-    """
 
     engine = str(
         engine or "google"
@@ -466,66 +758,27 @@ def normalize_search_engine(engine):
 
 
 def get_search_data(data):
-    """
-    Search request ke different possible formats support karta hai.
 
-    Supported:
+    data_obj = data.get(
+        "data"
+    ) or {}
 
-    {
-        "query": "OpenAI"
-    }
-
-    OR:
-
-    {
-        "data": {
-            "query": "OpenAI"
-        }
-    }
-
-    OR:
-
-    {
-        "extra_data": {
-            "query": "OpenAI"
-        }
-    }
-    """
+    extra_obj = data.get(
+        "extra_data"
+    ) or {}
 
     query = (
         data.get("query")
-        or
-        (
-            data.get(
-                "data"
-            ) or {}
-        ).get("query")
-        or
-        (
-            data.get(
-                "extra_data"
-            ) or {}
-        ).get("query")
-        or
-        ""
+        or data_obj.get("query")
+        or extra_obj.get("query")
+        or ""
     )
 
     engine = (
         data.get("engine")
-        or
-        (
-            data.get(
-                "data"
-            ) or {}
-        ).get("engine")
-        or
-        (
-            data.get(
-                "extra_data"
-            ) or {}
-        ).get("engine")
-        or
-        "google"
+        or data_obj.get("engine")
+        or extra_obj.get("engine")
+        or "google"
     )
 
     return (
@@ -535,56 +788,1000 @@ def get_search_data(data):
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 4: ROUTES
+# 13. URL VALIDATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def valid_http_url(url):
+
+    if not url:
+        return False
+
+    url = str(url).strip()
+
+    return (
+        url.startswith("http://")
+        or
+        url.startswith("https://")
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# HOME
+# 14. COMMAND PAYLOAD NORMALIZATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
+def normalize_command_payload(data):
+
+    payload = {}
+
+    if isinstance(data, dict):
+
+        for key, value in data.items():
+
+            if key in (
+                "action",
+                "command_id",
+                "created_at"
+            ):
+                continue
+
+            payload[key] = value
+
+    return payload
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 15. PERSISTENT BRIDGE COMMAND QUEUE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def queue_bridge_command(
+    action,
+    payload,
+    session_id=None,
+    priority=5,
+    max_attempts=3
+):
+
+    command_id = str(
+        uuid.uuid4()
+    )
+
+    now = now_iso()
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            INSERT INTO bridge_commands
+            (
+                command_id,
+                session_id,
+                action,
+                payload_json,
+                status,
+                priority,
+                attempts,
+                max_attempts,
+                available_at,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?)
+            """,
+            (
+                command_id,
+                session_id,
+                action,
+                json_dumps_safe(payload),
+                priority,
+                max_attempts,
+                now,
+                now,
+                now
+            )
+        )
+
+        conn.commit()
+
+        return command_id
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 16. CLAIM NEXT COMMAND
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def claim_next_bridge_command():
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            "BEGIN IMMEDIATE"
+        )
+
+        row = conn.execute(
+            """
+            SELECT *
+            FROM bridge_commands
+            WHERE status='queued'
+            AND (
+                available_at IS NULL
+                OR available_at <= ?
+            )
+            ORDER BY priority ASC, created_at ASC
+            LIMIT 1
+            """,
+            (now_iso(),)
+        ).fetchone()
+
+        if not row:
+
+            conn.commit()
+
+            return None
+
+        command_id = row["command_id"]
+
+        attempts = int(
+            row["attempts"] or 0
+        ) + 1
+
+        locked_at = now_iso()
+
+        updated = conn.execute(
+            """
+            UPDATE bridge_commands
+            SET
+                status='processing',
+                attempts=?,
+                locked_at=?,
+                updated_at=?
+            WHERE command_id=?
+            AND status='queued'
+            """,
+            (
+                attempts,
+                locked_at,
+                locked_at,
+                command_id
+            )
+        )
+
+        if updated.rowcount != 1:
+
+            conn.rollback()
+
+            return None
+
+        conn.commit()
+
+        payload = json_loads_safe(
+            row["payload_json"],
+            {}
+        )
+
+        return {
+
+            "command_id":
+                command_id,
+
+            "session_id":
+                row["session_id"],
+
+            "action":
+                row["action"],
+
+            "payload":
+                payload,
+
+            "attempts":
+                attempts,
+
+            "max_attempts":
+                row["max_attempts"],
+
+            "created_at":
+                row["created_at"]
+
+        }
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 17. COMPLETE COMMAND
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def complete_bridge_command(
+    command_id,
+    result_id=None
+):
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            UPDATE bridge_commands
+            SET
+                status='completed',
+                completed_at=?,
+                updated_at=?,
+                result_id=?
+            WHERE command_id=?
+            """,
+            (
+                now_iso(),
+                now_iso(),
+                result_id,
+                command_id
+            )
+        )
+
+        conn.commit()
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 18. FAIL / RETRY COMMAND
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def fail_bridge_command(
+    command_id,
+    error,
+    retry=True
+):
+
+    conn = db_connect()
+
+    try:
+
+        row = conn.execute(
+            """
+            SELECT attempts, max_attempts
+            FROM bridge_commands
+            WHERE command_id=?
+            """,
+            (command_id,)
+        ).fetchone()
+
+        if not row:
+
+            conn.close()
+
+            return
+
+        attempts = int(
+            row["attempts"] or 0
+        )
+
+        max_attempts = int(
+            row["max_attempts"] or 3
+        )
+
+        if retry and attempts < max_attempts:
+
+            conn.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status='queued',
+                    available_at=?,
+                    updated_at=?,
+                    error=?
+                WHERE command_id=?
+                """,
+                (
+                    now_iso(),
+                    now_iso(),
+                    str(error)[:2000],
+                    command_id
+                )
+            )
+
+        else:
+
+            conn.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status='failed',
+                    completed_at=?,
+                    updated_at=?,
+                    error=?
+                WHERE command_id=?
+                """,
+                (
+                    now_iso(),
+                    now_iso(),
+                    str(error)[:2000],
+                    command_id
+                )
+            )
+
+        conn.commit()
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 19. SAVE BRIDGE RESULT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def save_bridge_result(
+    result,
+    session_id=None
+):
+
+    result_id = str(
+        uuid.uuid4()
+    )
+
+    command_id = result.get(
+        "command_id"
+    )
+
+    action = normalize_bridge_action(
+        result.get("action")
+    )
+
+    success = bool(
+        result.get(
+            "success",
+            False
+        )
+    )
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            INSERT INTO bridge_results
+            (
+                result_id,
+                command_id,
+                session_id,
+                action,
+                success,
+                result_json,
+                error,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result_id,
+                command_id,
+                session_id,
+                action,
+                1 if success else 0,
+                json_dumps_safe(result),
+                str(
+                    result.get("error")
+                    or ""
+                )[:2000],
+                now_iso()
+            )
+        )
+
+        if command_id:
+
+            if success:
+
+                conn.execute(
+                    """
+                    UPDATE bridge_commands
+                    SET
+                        status='completed',
+                        completed_at=?,
+                        updated_at=?,
+                        result_id=?
+                    WHERE command_id=?
+                    """,
+                    (
+                        now_iso(),
+                        now_iso(),
+                        result_id,
+                        command_id
+                    )
+                )
+
+            else:
+
+                row = conn.execute(
+                    """
+                    SELECT attempts, max_attempts
+                    FROM bridge_commands
+                    WHERE command_id=?
+                    """,
+                    (command_id,)
+                ).fetchone()
+
+                if row:
+
+                    attempts = int(
+                        row["attempts"] or 0
+                    )
+
+                    max_attempts = int(
+                        row["max_attempts"] or 3
+                    )
+
+                    if attempts < max_attempts:
+
+                        conn.execute(
+                            """
+                            UPDATE bridge_commands
+                            SET
+                                status='queued',
+                                available_at=?,
+                                updated_at=?,
+                                error=?
+                            WHERE command_id=?
+                            """,
+                            (
+                                now_iso(),
+                                now_iso(),
+                                str(
+                                    result.get("error")
+                                    or "Extension action failed"
+                                )[:2000],
+                                command_id
+                            )
+                        )
+
+                    else:
+
+                        conn.execute(
+                            """
+                            UPDATE bridge_commands
+                            SET
+                                status='failed',
+                                completed_at=?,
+                                updated_at=?,
+                                error=?,
+                                result_id=?
+                            WHERE command_id=?
+                            """,
+                            (
+                                now_iso(),
+                                now_iso(),
+                                str(
+                                    result.get("error")
+                                    or "Extension action failed"
+                                )[:2000],
+                                result_id,
+                                command_id
+                            )
+                        )
+
+        conn.commit()
+
+        return result_id
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 20. AUTOMATION SESSION HELPERS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def create_automation_session(
+    user_command,
+    title=None,
+    plan=None,
+    extension_id=None
+):
+
+    session_id = str(
+        uuid.uuid4()
+    )
+
+    now = now_iso()
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            INSERT INTO automation_sessions
+            (
+                session_id,
+                status,
+                title,
+                user_command,
+                plan_json,
+                current_step,
+                current_action,
+                current_url,
+                last_result_json,
+                checkpoint_json,
+                last_error,
+                retry_count,
+                max_retries,
+                pause_reason,
+                extension_id,
+                created_at,
+                updated_at
+            )
+            VALUES
+            (?, 'RUNNING', ?, ?, ?, 0, NULL, NULL, NULL, NULL,
+             NULL, 0, 3, NULL, ?, ?, ?)
+            """,
+            (
+                session_id,
+                title or user_command[:100],
+                user_command,
+                json_dumps_safe(
+                    plan or []
+                ),
+                extension_id,
+                now,
+                now
+            )
+        )
+
+        conn.commit()
+
+        return session_id
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+def update_automation_session(
+    session_id,
+    **fields
+):
+
+    allowed = {
+
+        "status",
+        "title",
+        "user_command",
+        "plan_json",
+        "current_step",
+        "current_action",
+        "current_url",
+        "last_result_json",
+        "checkpoint_json",
+        "last_error",
+        "retry_count",
+        "max_retries",
+        "pause_reason",
+        "extension_id",
+        "completed_at"
+
+    }
+
+    updates = []
+    values = []
+
+    for key, value in fields.items():
+
+        if key not in allowed:
+            continue
+
+        updates.append(
+            f"{key}=?"
+        )
+
+        values.append(
+            value
+        )
+
+    if not updates:
+
+        return False
+
+    updates.append(
+        "updated_at=?"
+    )
+
+    values.append(
+        now_iso()
+    )
+
+    values.append(
+        session_id
+    )
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            f"""
+            UPDATE automation_sessions
+            SET {", ".join(updates)}
+            WHERE session_id=?
+            """,
+            values
+        )
+
+        conn.commit()
+
+        return True
+
+    finally:
+
+        conn.close()
+
+
+def get_automation_session(
+    session_id
+):
+
+    conn = db_connect()
+
+    try:
+
+        row = conn.execute(
+            """
+            SELECT *
+            FROM automation_sessions
+            WHERE session_id=?
+            """,
+            (session_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        result = dict(row)
+
+        result["plan"] = json_loads_safe(
+            result.get("plan_json"),
+            []
+        )
+
+        result["last_result"] = json_loads_safe(
+            result.get("last_result_json"),
+            None
+        )
+
+        result["checkpoint"] = json_loads_safe(
+            result.get("checkpoint_json"),
+            None
+        )
+
+        return result
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 21. CHECKPOINT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def save_automation_checkpoint(
+    session_id,
+    current_step,
+    current_action,
+    current_url=None,
+    snapshot=None
+):
+
+    checkpoint_id = str(
+        uuid.uuid4()
+    )
+
+    now = now_iso()
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            INSERT INTO automation_checkpoints
+            (
+                checkpoint_id,
+                session_id,
+                current_step,
+                current_action,
+                current_url,
+                snapshot_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                checkpoint_id,
+                session_id,
+                current_step,
+                current_action,
+                current_url,
+                json_dumps_safe(
+                    snapshot or {}
+                ),
+                now
+            )
+        )
+
+        conn.execute(
+            """
+            UPDATE automation_sessions
+            SET
+                current_step=?,
+                current_action=?,
+                current_url=?,
+                checkpoint_json=?,
+                updated_at=?
+            WHERE session_id=?
+            """,
+            (
+                current_step,
+                current_action,
+                current_url,
+                json_dumps_safe(
+                    snapshot or {}
+                ),
+                now,
+                session_id
+            )
+        )
+
+        conn.commit()
+
+        return checkpoint_id
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 22. EXTENSION REGISTRATION
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def save_extension_registration(
+    extension_id,
+    extension_name,
+    extension_version,
+    browser,
+    capabilities
+):
+
+    now = now_iso()
+
+    conn = db_connect()
+
+    try:
+
+        conn.execute(
+            """
+            INSERT INTO extension_registrations
+            (
+                extension_id,
+                extension_name,
+                extension_version,
+                browser,
+                capabilities_json,
+                registered_at,
+                last_seen,
+                disconnected_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+
+            ON CONFLICT(extension_id)
+            DO UPDATE SET
+
+                extension_name=excluded.extension_name,
+                extension_version=excluded.extension_version,
+                browser=excluded.browser,
+                capabilities_json=excluded.capabilities_json,
+                last_seen=excluded.last_seen,
+                disconnected_at=NULL
+            """,
+            (
+                extension_id,
+                extension_name,
+                extension_version,
+                browser,
+                json_dumps_safe(
+                    capabilities or []
+                ),
+                now,
+                now
+            )
+        )
+
+        conn.commit()
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+def get_latest_extension():
+
+    conn = db_connect()
+
+    try:
+
+        row = conn.execute(
+            """
+            SELECT *
+            FROM extension_registrations
+            ORDER BY last_seen DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+        if not row:
+            return None
+
+        result = dict(row)
+
+        result["capabilities"] = json_loads_safe(
+            result.get(
+                "capabilities_json"
+            ),
+            []
+        )
+
+        return result
+
+    finally:
+
+        conn.close()
+
+
+def extension_is_online():
+
+    extension = get_latest_extension()
+
+    if not extension:
+        return False
+
+    last_seen = extension.get(
+        "last_seen"
+    )
+
+    if not last_seen:
+        return False
+
+    try:
+
+        dt = datetime.fromisoformat(
+            last_seen
+        )
+
+        age = (
+            datetime.now() - dt
+        ).total_seconds()
+
+        return age <= EXTENSION_HEARTBEAT_TIMEOUT
+
+    except Exception:
+
+        return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 23. HOME
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 @app.route("/")
 def home():
-    """Home - System status"""
 
     return jsonify({
 
-        "status": "AI Ultimate Pro",
+        "status":
+            "AI Ultimate Pro",
 
-        "version": "7.1",
+        "version":
+            "8.0",
+
+        "architecture":
+            "Smart AI + Persistent Kiwi Browser Controller",
 
         "features": [
 
             "Chat",
-
             "Blogs",
-
             "History",
-
             "Batch Writes",
-
             "Image Understanding",
 
-            "Kiwi Extension Bridge",
-
+            "Persistent Browser Queue",
             "Browser Open",
+            "Browser Search",
+            "Page Scan",
+            "Task Detection",
+            "Find Element",
+            "Click",
+            "Type",
+            "Extract",
+            "Page Info",
+            "Wait",
+            "Automation Sessions",
+            "Checkpoints",
+            "Command Retry",
+            "Extension Heartbeat"
 
-            "Browser Search"
+        ],
 
-        ]
+        "bridge_online":
+            extension_is_online(),
+
+        "timestamp":
+            now_iso()
 
     })
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# HEALTH
+# 24. HEALTH
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route("/health")
 def health():
-    """Health check for UptimeRobot"""
 
     db_ok, db_msg = check_database()
 
@@ -596,10 +1793,13 @@ def health():
             else "degraded",
 
         "timestamp":
-            datetime.now().isoformat(),
+            now_iso(),
 
         "database":
             db_msg,
+
+        "bridge_online":
+            extension_is_online(),
 
         "uptime_seconds":
             get_uptime()
@@ -608,50 +1808,48 @@ def health():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# PING
+# 25. PING
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route("/ping")
 def ping():
-    """Simple ping"""
 
     return "pong", 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# KEEP ALIVE
+# 26. KEEP ALIVE
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/keep-alive",
     methods=["GET"]
 )
 def keep_alive():
-    """Keep Render awake"""
 
     return jsonify({
 
-        "status": "awake",
+        "status":
+            "awake",
 
         "timestamp":
-            datetime.now().isoformat(),
+            now_iso(),
 
         "uptime_seconds":
-            get_uptime()
+            get_uptime(),
+
+        "bridge_online":
+            extension_is_online()
 
     }), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# CAMPAIGNS
+# 27. CAMPAIGNS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route("/campaigns")
 def campaigns():
-    """Get all campaigns/chats"""
 
     try:
 
@@ -666,15 +1864,15 @@ def campaigns():
 
         return jsonify({
 
-            "error": str(e)
+            "error":
+                str(e)
 
         }), 500
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# CAMPAIGN DETAILS
+# 28. CAMPAIGN DETAILS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/campaign/<campaign_id>"
@@ -682,7 +1880,6 @@ def campaigns():
 def get_campaign_details(
     campaign_id
 ):
-    """Get specific chat history"""
 
     try:
 
@@ -693,8 +1890,12 @@ def get_campaign_details(
         history = [
 
             {
-                "role": h["role"],
-                "content": h["content"]
+                "role":
+                    h["role"],
+
+                "content":
+                    h["content"]
+
             }
 
             for h in all_history
@@ -713,7 +1914,8 @@ def get_campaign_details(
 
             return jsonify({
 
-                "error": "Chat deleted"
+                "error":
+                    "Chat deleted"
 
             }), 404
 
@@ -741,22 +1943,21 @@ def get_campaign_details(
 
         return jsonify({
 
-            "error": str(e)
+            "error":
+                str(e)
 
         }), 500
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# NEW COMMAND
+# 29. NEW COMMAND
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/command",
     methods=["POST"]
 )
 def command():
-    """Create new chat with command"""
 
     try:
 
@@ -796,7 +1997,7 @@ def command():
             uuid.uuid4()
         )
 
-        now = datetime.now().isoformat()
+        now = now_iso()
 
         is_ques = (
             1
@@ -816,21 +2017,22 @@ def command():
             campaign_id
         )
 
+        # Campaign first so batch update has a row.
+        create_campaign(
+            campaign_id,
+            query[:50],
+            now,
+            0,
+            0,
+            query[:100]
+        )
+
         save_messages_batch(
             campaign_id,
             query,
             response,
             is_ques,
             now
-        )
-
-        create_campaign(
-            campaign_id,
-            query[:50],
-            now,
-            2,
-            is_ques,
-            query[:100]
         )
 
         return jsonify({
@@ -854,6 +2056,8 @@ def command():
             f"❌ /command error: {e}"
         )
 
+        traceback.print_exc()
+
         return jsonify({
 
             "error":
@@ -863,16 +2067,14 @@ def command():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# CHAT
+# 30. CHAT
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/chat/<campaign_id>",
     methods=["POST"]
 )
 def chat(campaign_id):
-    """Send message to existing chat"""
 
     try:
 
@@ -932,7 +2134,7 @@ def chat(campaign_id):
 
             }), 400
 
-        now = datetime.now().isoformat()
+        now = now_iso()
 
         is_ques = (
             1
@@ -950,10 +2152,7 @@ def chat(campaign_id):
             recent_history
         )
 
-        # ------------------------------------------------
         # RENAME
-        # ------------------------------------------------
-
         if message.lower().startswith(
             "rename "
         ):
@@ -984,14 +2183,8 @@ def chat(campaign_id):
 
                 })
 
-        # ------------------------------------------------
         # DELETE
-        # ------------------------------------------------
-
-        elif (
-            message.lower().strip()
-            == "delete"
-        ):
+        elif message.lower().strip() == "delete":
 
             delete_campaign(
                 campaign_id,
@@ -1011,10 +2204,6 @@ def chat(campaign_id):
 
             })
 
-        # ------------------------------------------------
-        # AI RESPONSE
-        # ------------------------------------------------
-
         response = generate_response(
             intent,
             message,
@@ -1022,10 +2211,6 @@ def chat(campaign_id):
             recent_history,
             campaign_id
         )
-
-        # ------------------------------------------------
-        # BATCH WRITE
-        # ------------------------------------------------
 
         new_question_count = (
             save_messages_batch(
@@ -1058,6 +2243,8 @@ def chat(campaign_id):
             f"❌ /chat error: {e}"
         )
 
+        traceback.print_exc()
+
         return jsonify({
 
             "error":
@@ -1067,9 +2254,8 @@ def chat(campaign_id):
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# RENAME
+# 31. CAMPAIGN RENAME
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/campaign/rename/<campaign_id>",
@@ -1078,7 +2264,6 @@ def chat(campaign_id):
 def rename_campaign_route(
     campaign_id
 ):
-    """Rename a chat"""
 
     try:
 
@@ -1099,7 +2284,7 @@ def rename_campaign_route(
 
         rename_campaign(
             campaign_id,
-            new_name
+            str(new_name).strip()[:200]
         )
 
         return jsonify({
@@ -1123,9 +2308,8 @@ def rename_campaign_route(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# DELETE
+# 32. CAMPAIGN DELETE
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/campaign/delete/<campaign_id>",
@@ -1134,13 +2318,12 @@ def rename_campaign_route(
 def delete_campaign_route(
     campaign_id
 ):
-    """Delete a chat"""
 
     try:
 
         delete_campaign(
             campaign_id,
-            datetime.now().isoformat()
+            now_iso()
         )
 
         return jsonify({
@@ -1161,9 +2344,8 @@ def delete_campaign_route(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# RESTORE
+# 33. CAMPAIGN RESTORE
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/campaign/restore/<campaign_id>",
@@ -1172,7 +2354,6 @@ def delete_campaign_route(
 def restore_campaign_route(
     campaign_id
 ):
-    """Restore deleted chat"""
 
     try:
 
@@ -1198,15 +2379,13 @@ def restore_campaign_route(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BLOG
+# 34. BLOG
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/blog/<slug>"
 )
 def blog(slug):
-    """View blog post"""
 
     try:
 
@@ -1269,16 +2448,14 @@ def blog(slug):
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# PUBLISH BLOG
+# 35. PUBLISH BLOG
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/blog/publish",
     methods=["POST"]
 )
 def publish_blog():
-    """Publish blog post"""
 
     try:
 
@@ -1311,7 +2488,7 @@ def publish_blog():
             + str(uuid.uuid4())[:5]
         )
 
-        now = datetime.now().isoformat()
+        now = now_iso()
 
         save_blog(
             blog_id,
@@ -1345,24 +2522,18 @@ def publish_blog():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BLOGS
+# 36. BLOGS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route("/blogs")
 def blogs():
-    """Get all blogs"""
 
     try:
-
-        all_blogs = get_all_blogs(
-            20
-        )
 
         return jsonify({
 
             "blogs":
-                all_blogs
+                get_all_blogs(20)
 
         })
 
@@ -1377,18 +2548,14 @@ def blogs():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# CHAT WITH IMAGE
+# 37. CHAT WITH IMAGE
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/chat/image",
     methods=["POST"]
 )
 def chat_image():
-    """
-    Chat with image
-    """
 
     try:
 
@@ -1471,24 +2638,48 @@ def chat_image():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# SMART WEBSITE MASTER AUTOMATION
+# 38. AUTOMATION START
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/automation/start",
     methods=["POST"]
 )
 def automation_start():
-    """
-    Start Automation
-    """
 
     try:
 
+        data = request.json or {}
+
+        command_value = data.get(
+            "command",
+            "RapidWorker pe jao, task karo"
+        )
+
         global _orchestrator_running
 
-        if _orchestrator_running:
+        with _orchestrator_lock:
+
+            if _orchestrator_running:
+
+                return jsonify({
+
+                    "success":
+                        False,
+
+                    "message":
+                        "⚠️ Automation already running!",
+
+                    "status":
+                        "running"
+
+                }), 400
+
+        started = run_orchestrator_async(
+            command_value
+        )
+
+        if not started:
 
             return jsonify({
 
@@ -1496,43 +2687,12 @@ def automation_start():
                     False,
 
                 "message":
-                    "⚠️ Automation already running!",
+                    "Automation already running",
 
                 "status":
                     "running"
 
             }), 400
-
-        orchestrator = get_orchestrator()
-
-        def run_automation():
-
-            global _orchestrator_running
-
-            try:
-
-                orchestrator.run(
-                    "RapidWorker pe jao, task karo"
-                )
-
-            except Exception as e:
-
-                print(
-                    f"❌ Automation error: {e}"
-                )
-
-            finally:
-
-                _orchestrator_running = False
-
-        thread = threading.Thread(
-            target=run_automation,
-            daemon=True
-        )
-
-        thread.start()
-
-        _orchestrator_running = True
 
         return jsonify({
 
@@ -1545,12 +2705,19 @@ def automation_start():
             "status":
                 "starting",
 
+            "command":
+                command_value,
+
             "timestamp":
-                datetime.now().isoformat()
+                now_iso()
 
         })
 
     except Exception as e:
+
+        print(
+            f"❌ Automation start error: {e}"
+        )
 
         return jsonify({
 
@@ -1564,24 +2731,35 @@ def automation_start():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# AUTOMATION STOP
+# 39. AUTOMATION STOP
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/automation/stop",
     methods=["POST"]
 )
 def automation_stop():
-    """
-    Stop Automation
-    """
+
+    global _orchestrator_running
 
     try:
 
-        global _orchestrator_running
-
         _orchestrator_running = False
+
+        # Agar orchestrator ke paas stop method hai
+        try:
+
+            orchestrator = get_orchestrator()
+
+            if hasattr(
+                orchestrator,
+                "stop"
+            ):
+
+                orchestrator.stop()
+
+        except Exception:
+            pass
 
         return jsonify({
 
@@ -1589,13 +2767,13 @@ def automation_stop():
                 True,
 
             "message":
-                "🛑 Automation stopped!",
+                "🛑 Automation stop requested!",
 
             "status":
                 "stopped",
 
             "timestamp":
-                datetime.now().isoformat()
+                now_iso()
 
         })
 
@@ -1613,18 +2791,14 @@ def automation_stop():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# AUTOMATION STATUS
+# 40. AUTOMATION STATUS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/automation/status",
     methods=["GET"]
 )
 def automation_status():
-    """
-    Get Automation Status
-    """
 
     try:
 
@@ -1652,7 +2826,13 @@ def automation_status():
                 True,
 
             "status":
-                status
+                status,
+
+            "server_running":
+                _orchestrator_running,
+
+            "bridge_online":
+                extension_is_online()
 
         })
 
@@ -1670,30 +2850,24 @@ def automation_status():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# AUTOMATION COMMAND
+# 41. AUTOMATION COMMAND
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/automation/command",
     methods=["POST"]
 )
 def automation_command():
-    """
-    Send Automation Command
-    """
 
     try:
 
         data = request.json or {}
 
-        command_value = data.get(
-            "command",
-            ""
-        )
-
         command_value = str(
-            command_value
+            data.get(
+                "command",
+                ""
+            )
         ).lower().strip()
 
         if not command_value:
@@ -1712,30 +2886,28 @@ def automation_command():
 
             return automation_start()
 
-        elif command_value == "stop":
+        if command_value == "stop":
 
             return automation_stop()
 
-        elif command_value == "status":
+        if command_value == "status":
 
             return automation_status()
 
-        else:
+        return jsonify({
 
-            return jsonify({
+            "success":
+                False,
 
-                "success":
-                    False,
+            "error":
+                (
+                    f"Unknown command: "
+                    f"{command_value}. "
+                    f"Available: "
+                    f"start, stop, status"
+                )
 
-                "error":
-                    (
-                        f"Unknown command: "
-                        f"{command_value}. "
-                        f"Available: "
-                        f"start, stop, status"
-                    )
-
-            }), 400
+        }), 400
 
     except Exception as e:
 
@@ -1751,18 +2923,14 @@ def automation_command():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# TASK START
+# 42. TASK START
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/task/start",
     methods=["POST"]
 )
 def task_start():
-    """
-    Extension se task start command
-    """
 
     try:
 
@@ -1773,36 +2941,24 @@ def task_start():
             "task start"
         )
 
-        orchestrator = get_orchestrator()
-
-        def run_task():
-
-            global _orchestrator_running
-
-            _orchestrator_running = True
-
-            try:
-
-                orchestrator.run(
-                    command_value
-                )
-
-            except Exception as e:
-
-                print(
-                    f"❌ Task error: {e}"
-                )
-
-            finally:
-
-                _orchestrator_running = False
-
-        thread = threading.Thread(
-            target=run_task,
-            daemon=True
+        started = run_orchestrator_async(
+            command_value
         )
 
-        thread.start()
+        if not started:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "message":
+                    "Task already running",
+
+                "status":
+                    "running"
+
+            }), 400
 
         return jsonify({
 
@@ -1813,7 +2969,10 @@ def task_start():
                 "✅ Task started!",
 
             "status":
-                "running"
+                "running",
+
+            "command":
+                command_value
 
         })
 
@@ -1831,18 +2990,14 @@ def task_start():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# TASK STOP
+# 43. TASK STOP
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/task/stop",
     methods=["POST"]
 )
 def task_stop():
-    """
-    Extension se task stop command
-    """
 
     try:
 
@@ -1850,13 +3005,30 @@ def task_stop():
 
         _orchestrator_running = False
 
+        try:
+
+            orchestrator = get_orchestrator()
+
+            if hasattr(
+                orchestrator,
+                "stop"
+            ):
+
+                orchestrator.stop()
+
+        except Exception:
+            pass
+
         return jsonify({
 
             "success":
                 True,
 
             "message":
-                "⏹ Task stopped!"
+                "⏹ Task stop requested!",
+
+            "status":
+                "stopped"
 
         })
 
@@ -1874,18 +3046,14 @@ def task_stop():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# TASK STATUS
+# 44. TASK STATUS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/task/status",
     methods=["GET"]
 )
 def task_status():
-    """
-    Extension se status check
-    """
 
     try:
 
@@ -1928,7 +3096,10 @@ def task_status():
                 status.get(
                     "total_earned",
                     0
-                )
+                ),
+
+            "bridge_online":
+                extension_is_online()
 
         })
 
@@ -1946,41 +3117,14 @@ def task_status():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# 🧪 EXTENSION TEST BRIDGE
+# 45. KIWI BRIDGE PING
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-#
-# Supported:
-#
-#    GET  /extension/test/ping
-#    POST /extension/test/register
-#    POST /extension/test/command
-#    GET  /extension/test/next
-#    POST /extension/test/result
-#    GET  /extension/test/status
-#
-# Actions:
-#
-#    open
-#    search
-#
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
-
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE PING
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/ping",
     methods=["GET"]
 )
 def extension_test_ping():
-    """
-    Test Bridge Ping
-
-    Authentication required nahi hai.
-    """
 
     return jsonify({
 
@@ -1994,38 +3138,32 @@ def extension_test_ping():
             "online",
 
         "version":
-            "7.1",
+            "8.0",
 
-        "supported_actions": [
+        "supported_actions":
+            SUPPORTED_BRIDGE_ACTIONS,
 
-            "open",
-
-            "search"
-
-        ],
+        "bridge_online":
+            extension_is_online(),
 
         "message":
-            "Extension test bridge is reachable",
+            "Advanced extension bridge is reachable",
 
         "timestamp":
-            datetime.now().isoformat()
+            now_iso()
 
     }), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE REGISTER
+# 46. KIWI REGISTER
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/register",
     methods=["POST"]
 )
 def extension_test_register():
-    """
-    Kiwi Extension apne aap ko Render bridge par register karegi.
-    """
 
     if not extension_test_authorized():
 
@@ -2045,34 +3183,50 @@ def extension_test_register():
             silent=True
         ) or {}
 
-        extension_id = data.get(
-            "extension_id",
-            "kiwi-test-extension"
-        )
-
         extension_id = str(
-            extension_id
+            data.get(
+                "extension_id",
+                "kiwi-extension"
+            )
         ).strip()
+
+        extension_name = str(
+            data.get(
+                "extension_name",
+                "Ultimate Browser Controller Pro"
+            )
+        ).strip()
+
+        extension_version = str(
+            data.get(
+                "extension_version",
+                "unknown"
+            )
+        ).strip()
+
+        browser = str(
+            data.get(
+                "browser",
+                "Kiwi Browser"
+            )
+        ).strip()
+
+        capabilities = data.get(
+            "capabilities",
+            []
+        )
 
         if not extension_id:
 
-            extension_id = (
-                "kiwi-test-extension"
-            )
+            extension_id = "kiwi-extension"
 
-        with _extension_test_lock:
-
-            _extension_test_state[
-                "registered"
-            ] = True
-
-            _extension_test_state[
-                "extension_id"
-            ] = extension_id
-
-            _extension_test_state[
-                "registered_at"
-            ] = datetime.now().isoformat()
+        save_extension_registration(
+            extension_id,
+            extension_name,
+            extension_version,
+            browser,
+            capabilities
+        )
 
         return jsonify({
 
@@ -2085,11 +3239,23 @@ def extension_test_register():
             "extension_id":
                 extension_id,
 
+            "extension_name":
+                extension_name,
+
+            "extension_version":
+                extension_version,
+
+            "browser":
+                browser,
+
+            "capabilities":
+                capabilities,
+
             "message":
                 "Kiwi extension registered successfully",
 
             "timestamp":
-                datetime.now().isoformat()
+                now_iso()
 
         }), 200
 
@@ -2098,6 +3264,8 @@ def extension_test_register():
         print(
             f"❌ Extension register error: {e}"
         )
+
+        traceback.print_exc()
 
         return jsonify({
 
@@ -2111,61 +3279,14 @@ def extension_test_register():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE COMMAND
-# 🔥 MAIN FIX
+# 47. KIWI COMMAND
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/command",
     methods=["POST"]
 )
 def extension_test_command():
-    """
-    Queue command for Kiwi Extension.
-
-    Supported:
-
-        OPEN:
-
-        {
-            "action": "open",
-            "url": "https://www.google.com"
-        }
-
-
-        SEARCH:
-
-        {
-            "action": "search",
-            "query": "OpenAI",
-            "engine": "google"
-        }
-
-
-    Search ke liye ye formats bhi accepted hain:
-
-        {
-            "action": "search",
-            "data": {
-                "query": "OpenAI",
-                "engine": "google"
-            }
-        }
-
-
-        {
-            "action": "search",
-            "extra_data": {
-                "query": "OpenAI",
-                "engine": "google"
-            }
-        }
-    """
-
-    # --------------------------------------------------------
-    # AUTH
-    # --------------------------------------------------------
 
     if not extension_test_authorized():
 
@@ -2184,10 +3305,6 @@ def extension_test_command():
         data = request.get_json(
             silent=True
         ) or {}
-
-        # ----------------------------------------------------
-        # ACTION
-        # ----------------------------------------------------
 
         action = normalize_bridge_action(
             data.get("action")
@@ -2203,28 +3320,35 @@ def extension_test_command():
                 "error":
                     "action is required",
 
-                "supported_actions": [
-
-                    "open",
-
-                    "search"
-
-                ]
+                "supported_actions":
+                    SUPPORTED_BRIDGE_ACTIONS
 
             }), 400
 
-        # ══════════════════════════════════════════════════
+        if action not in SUPPORTED_BRIDGE_ACTIONS:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "error":
+                    f"Unsupported bridge action: {action}",
+
+                "supported_actions":
+                    SUPPORTED_BRIDGE_ACTIONS
+
+            }), 400
+
+        # ---------------------------------------------------------------------------------------------
         # OPEN
-        # ══════════════════════════════════════════════════
+        # ---------------------------------------------------------------------------------------------
 
         if action == "open":
 
-            url = data.get(
-                "url"
-            )
-
             url = str(
-                url or ""
+                data.get("url")
+                or ""
             ).strip()
 
             if not url:
@@ -2239,19 +3363,7 @@ def extension_test_command():
 
                 }), 400
 
-            # ------------------------------------------------
-            # URL SAFETY
-            # ------------------------------------------------
-
-            if not (
-                url.startswith(
-                    "http://"
-                )
-                or
-                url.startswith(
-                    "https://"
-                )
-            ):
+            if not valid_http_url(url):
 
                 return jsonify({
 
@@ -2259,35 +3371,13 @@ def extension_test_command():
                         False,
 
                     "error":
-                        (
-                            "Only HTTP/HTTPS "
-                            "URLs are supported"
-                        )
+                        "Only HTTP/HTTPS URLs are supported"
 
                 }), 400
 
-            command = {
-
-                "command_id":
-                    str(
-                        uuid.uuid4()
-                    ),
-
-                "action":
-                    "open",
-
-                "url":
-                    url,
-
-                "created_at":
-                    datetime.now().isoformat()
-
-            }
-
-        # ══════════════════════════════════════════════════
+        # ---------------------------------------------------------------------------------------------
         # SEARCH
-        # 🔥 NEW
-        # ══════════════════════════════════════════════════
+        # ---------------------------------------------------------------------------------------------
 
         elif action == "search":
 
@@ -2303,124 +3393,207 @@ def extension_test_command():
                         False,
 
                     "error":
-                        (
-                            "query is required "
-                            "for search action"
-                        )
+                        "query is required for search action"
 
                 }), 400
 
-            command = {
+            data["query"] = query
+            data["engine"] = engine
 
-                "command_id":
-                    str(
-                        uuid.uuid4()
-                    ),
+        # ---------------------------------------------------------------------------------------------
+        # TYPE
+        # ---------------------------------------------------------------------------------------------
 
-                "action":
-                    "search",
+        elif action == "type":
 
-                "query":
-                    query,
+            text_value = (
+                data.get("text")
+                or
+                data.get("value")
+                or
+                data.get("input")
+                or
+                ""
+            )
 
-                "engine":
-                    engine,
-
-                "created_at":
-                    datetime.now().isoformat()
-
-            }
-
-        # ══════════════════════════════════════════════════
-        # UNSUPPORTED
-        # ══════════════════════════════════════════════════
-
-        else:
-
-            return jsonify({
-
-                "success":
-                    False,
-
-                "error":
-                    (
-                        f"Unsupported bridge action: "
-                        f"{action}"
-                    ),
-
-                "supported_actions": [
-
-                    "open",
-
-                    "search"
-
-                ]
-
-            }), 400
-
-        # ══════════════════════════════════════════════════
-        # QUEUE
-        # ══════════════════════════════════════════════════
-
-        with _extension_test_lock:
-
-            # Ek time par ek hi pending command.
-            #
-            # Agar extension abhi previous command consume
-            # nahi kar paayi hai to new command ko overwrite
-            # nahi karenge.
-            if (
-                _extension_test_state[
-                    "pending_command"
-                ]
-                is not None
-            ):
+            if not str(
+                text_value
+            ).strip():
 
                 return jsonify({
 
                     "success":
                         False,
 
-                    "queued":
+                    "error":
+                        "text/value/input required for type action"
+
+                }), 400
+
+        # ---------------------------------------------------------------------------------------------
+        # FIND / CLICK
+        # ---------------------------------------------------------------------------------------------
+
+        elif action in (
+            "find",
+            "find_element",
+            "click",
+            "click_by_text"
+        ):
+
+            target = (
+                data.get("text")
+                or
+                data.get("selector")
+                or
+                data.get("target")
+                or
+                ""
+            )
+
+            if not str(
+                target
+            ).strip():
+
+                return jsonify({
+
+                    "success":
                         False,
 
                     "error":
-                        (
-                            "Another extension "
-                            "command is already pending"
-                        ),
+                        "text/selector/target required"
 
-                    "pending_command":
-                        True
+                }), 400
 
-                }), 409
+        # ---------------------------------------------------------------------------------------------
+        # WAIT
+        # ---------------------------------------------------------------------------------------------
 
-            _extension_test_state[
-                "pending_command"
-            ] = command
+        elif action in (
+            "wait_text",
+            "wait_for_text"
+        ):
 
-            _extension_test_state[
-                "last_command_at"
-            ] = datetime.now().isoformat()
+            if not str(
+                data.get("text")
+                or
+                data.get("target")
+                or
+                ""
+            ).strip():
 
-            _extension_test_state[
-                "last_command_id"
-            ] = command[
-                "command_id"
-            ]
+                return jsonify({
 
-            # Previous result clear.
-            _extension_test_state[
-                "last_result"
-            ] = None
+                    "success":
+                        False,
 
-            _extension_test_state[
-                "last_result_at"
-            ] = None
+                    "error":
+                        "text/target required"
 
-        # ══════════════════════════════════════════════════
-        # RESPONSE
-        # ══════════════════════════════════════════════════
+                }), 400
+
+        elif action in (
+            "wait_selector",
+            "wait_for_selector"
+        ):
+
+            if not str(
+                data.get("selector")
+                or
+                data.get("target")
+                or
+                ""
+            ).strip():
+
+                return jsonify({
+
+                    "success":
+                        False,
+
+                    "error":
+                        "selector/target required"
+
+                }), 400
+
+        # ---------------------------------------------------------------------------------------------
+        # SESSION
+        # ---------------------------------------------------------------------------------------------
+
+        session_id = data.get(
+            "session_id"
+        )
+
+        # ---------------------------------------------------------------------------------------------
+        # PRIORITY
+        # ---------------------------------------------------------------------------------------------
+
+        try:
+
+            priority = int(
+                data.get(
+                    "priority",
+                    5
+                )
+            )
+
+        except Exception:
+
+            priority = 5
+
+        priority = max(
+            1,
+            min(
+                priority,
+                100
+            )
+        )
+
+        # ---------------------------------------------------------------------------------------------
+        # MAX ATTEMPTS
+        # ---------------------------------------------------------------------------------------------
+
+        try:
+
+            max_attempts = int(
+                data.get(
+                    "max_attempts",
+                    EXTENSION_MAX_RETRIES
+                )
+            )
+
+        except Exception:
+
+            max_attempts = EXTENSION_MAX_RETRIES
+
+        max_attempts = max(
+            1,
+            min(
+                max_attempts,
+                10
+            )
+        )
+
+        payload = normalize_command_payload(
+            data
+        )
+
+        # Ensure normalized search data
+        if action == "search":
+
+            query, engine = get_search_data(
+                data
+            )
+
+            payload["query"] = query
+            payload["engine"] = engine
+
+        command_id = queue_bridge_command(
+            action=action,
+            payload=payload,
+            session_id=session_id,
+            priority=priority,
+            max_attempts=max_attempts
+        )
 
         return jsonify({
 
@@ -2430,14 +3603,20 @@ def extension_test_command():
             "queued":
                 True,
 
-            "command":
-                command,
+            "command_id":
+                command_id,
+
+            "action":
+                action,
+
+            "session_id":
+                session_id,
 
             "message":
-                (
-                    "Command queued successfully "
-                    "for Kiwi extension"
-                )
+                "Command permanently queued for Kiwi extension",
+
+            "timestamp":
+                now_iso()
 
         }), 200
 
@@ -2446,6 +3625,8 @@ def extension_test_command():
         print(
             f"❌ Extension command error: {e}"
         )
+
+        traceback.print_exc()
 
         return jsonify({
 
@@ -2459,22 +3640,14 @@ def extension_test_command():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE NEXT
+# 48. KIWI NEXT COMMAND
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/next",
     methods=["GET"]
 )
 def extension_test_next():
-    """
-    Kiwi Extension is route ko poll karegi.
-
-    Command milne ke baad queue se remove kar di jayegi.
-
-    Isse same command repeat nahi hogi.
-    """
 
     if not extension_test_authorized():
 
@@ -2490,18 +3663,86 @@ def extension_test_next():
 
     try:
 
-        with _extension_test_lock:
+        # Extension ko online mark karne ke liye
+        extension_id = request.headers.get(
+            "X-Extension-ID"
+        )
 
-            command = (
-                _extension_test_state[
-                    "pending_command"
-                ]
-            )
+        if extension_id:
 
-            # Queue consume.
-            _extension_test_state[
-                "pending_command"
-            ] = None
+            conn = db_connect()
+
+            try:
+
+                conn.execute(
+                    """
+                    UPDATE extension_registrations
+                    SET last_seen=?, disconnected_at=NULL
+                    WHERE extension_id=?
+                    """,
+                    (
+                        now_iso(),
+                        extension_id
+                    )
+                )
+
+                conn.commit()
+
+            finally:
+
+                conn.close()
+
+        command = claim_next_bridge_command()
+
+        if not command:
+
+            return jsonify({
+
+                "success":
+                    True,
+
+                "command":
+                    None,
+
+                "message":
+                    "No command pending",
+
+                "timestamp":
+                    now_iso()
+
+            }), 200
+
+        # ---------------------------------------------------------------------------------------------
+        # Flat command format extension compatibility ke liye
+        # ---------------------------------------------------------------------------------------------
+
+        response_command = {
+
+            "command_id":
+                command["command_id"],
+
+            "session_id":
+                command["session_id"],
+
+            "action":
+                command["action"],
+
+            **(
+                command["payload"]
+                if isinstance(
+                    command["payload"],
+                    dict
+                )
+                else {}
+            ),
+
+            "created_at":
+                command["created_at"],
+
+            "attempts":
+                command["attempts"]
+
+        }
 
         return jsonify({
 
@@ -2509,7 +3750,10 @@ def extension_test_next():
                 True,
 
             "command":
-                command
+                response_command,
+
+            "timestamp":
+                now_iso()
 
         }), 200
 
@@ -2518,6 +3762,8 @@ def extension_test_next():
         print(
             f"❌ Extension next error: {e}"
         )
+
+        traceback.print_exc()
 
         return jsonify({
 
@@ -2531,42 +3777,14 @@ def extension_test_next():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE RESULT
-# 🔥 SEARCH RESULT FIELDS ADDED
+# 49. KIWI RESULT
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/result",
     methods=["POST"]
 )
 def extension_test_result():
-    """
-    Kiwi Extension action complete hone ke baad
-    result yahan bhejegi.
-
-    OPEN result:
-
-        {
-            "command_id": "...",
-            "success": true,
-            "action": "open",
-            "url": "https://www.google.com"
-        }
-
-
-    SEARCH result:
-
-        {
-            "command_id": "...",
-            "success": true,
-            "action": "search",
-            "query": "OpenAI",
-            "engine": "google",
-            "url": "...",
-            "message": "..."
-        }
-    """
 
     if not extension_test_authorized():
 
@@ -2602,13 +3820,48 @@ def extension_test_result():
             "command_id"
         )
 
+        if not command_id:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "error":
+                    "command_id is required"
+
+            }), 400
+
         action = normalize_bridge_action(
             data.get("action")
         )
 
-        # ----------------------------------------------------
-        # RESULT OBJECT
-        # ----------------------------------------------------
+        # ---------------------------------------------------------------------------------------------
+        # Find session associated with command
+        # ---------------------------------------------------------------------------------------------
+
+        session_id = None
+
+        conn = db_connect()
+
+        try:
+
+            row = conn.execute(
+                """
+                SELECT session_id
+                FROM bridge_commands
+                WHERE command_id=?
+                """,
+                (command_id,)
+            ).fetchone()
+
+            if row:
+
+                session_id = row["session_id"]
+
+        finally:
+
+            conn.close()
 
         result = {
 
@@ -2627,117 +3880,60 @@ def extension_test_result():
                 action,
 
             "url":
-                data.get(
-                    "url"
-                ),
+                data.get("url"),
 
-            # Search fields
             "query":
-                data.get(
-                    "query"
-                ),
+                data.get("query"),
 
             "engine":
-                data.get(
-                    "engine"
-                ),
+                data.get("engine"),
 
-            # Browser tab
             "tab_id":
-                data.get(
-                    "tab_id"
-                ),
+                data.get("tab_id"),
 
-            # Human-readable message
+            "title":
+                data.get("title"),
+
             "message":
-                data.get(
-                    "message"
-                ),
+                data.get("message"),
+
+            "text":
+                data.get("text"),
+
+            "data":
+                data.get("data"),
+
+            "error":
+                data.get("error"),
 
             "received_at":
-                datetime.now().isoformat()
+                now_iso()
 
         }
 
-        # ----------------------------------------------------
-        # OPTIONAL FIELDS
-        # ----------------------------------------------------
+        result_id = save_bridge_result(
+            result,
+            session_id=session_id
+        )
 
-        if "error" in data:
+        # ---------------------------------------------------------------------------------------------
+        # Session update
+        # ---------------------------------------------------------------------------------------------
 
-            result["error"] = data.get(
-                "error"
+        if session_id:
+
+            update_automation_session(
+                session_id,
+                current_action=action,
+                current_url=data.get("url"),
+                last_result_json=json_dumps_safe(
+                    result
+                ),
+                last_error=str(
+                    data.get("error")
+                    or ""
+                )[:2000]
             )
-
-        if "title" in data:
-
-            result["title"] = data.get(
-                "title"
-            )
-
-        if "text" in data:
-
-            result["text"] = data.get(
-                "text"
-            )
-
-        if "data" in data:
-
-            result["data"] = data.get(
-                "data"
-            )
-
-        # ----------------------------------------------------
-        # COMMAND ID VALIDATION
-        # ----------------------------------------------------
-
-        with _extension_test_lock:
-
-            expected_command_id = (
-                _extension_test_state[
-                    "last_command_id"
-                ]
-            )
-
-            # Agar command ID available hai aur incoming
-            # result kisi old command ka hai, usse reject
-            # nahi karenge completely, lekin warning log karenge.
-            #
-            # Isse debugging easy rahegi.
-            if (
-                expected_command_id
-                and
-                command_id
-                and
-                command_id != expected_command_id
-            ):
-
-                print(
-                    "⚠️ Extension result command_id "
-                    "does not match latest command:"
-                )
-
-                print(
-                    "Expected:",
-                    expected_command_id
-                )
-
-                print(
-                    "Received:",
-                    command_id
-                )
-
-            # ------------------------------------------------
-            # SAVE RESULT
-            # ------------------------------------------------
-
-            _extension_test_state[
-                "last_result"
-            ] = result
-
-            _extension_test_state[
-                "last_result_at"
-            ] = datetime.now().isoformat()
 
         return jsonify({
 
@@ -2745,10 +3941,16 @@ def extension_test_result():
                 True,
 
             "message":
-                "Result received by Render",
+                "Result received and persisted by Render",
 
-            "result":
-                result
+            "result_id":
+                result_id,
+
+            "command_id":
+                command_id,
+
+            "session_id":
+                session_id
 
         }), 200
 
@@ -2757,6 +3959,8 @@ def extension_test_result():
         print(
             f"❌ Extension result error: {e}"
         )
+
+        traceback.print_exc()
 
         return jsonify({
 
@@ -2770,20 +3974,14 @@ def extension_test_result():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# BRIDGE STATUS
+# 50. BRIDGE STATUS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-
 
 @app.route(
     "/extension/test/status",
     methods=["GET"]
 )
 def extension_test_status():
-    """
-    Complete extension bridge status.
-
-    Secret token response mein nahi aayega.
-    """
 
     if not extension_test_authorized():
 
@@ -2799,9 +3997,95 @@ def extension_test_status():
 
     try:
 
-        state = (
-            extension_test_state_snapshot()
+        conn = db_connect()
+
+        try:
+
+            queued = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM bridge_commands
+                WHERE status='queued'
+                """
+            ).fetchone()[0]
+
+            processing = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM bridge_commands
+                WHERE status='processing'
+                """
+            ).fetchone()[0]
+
+            completed = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM bridge_commands
+                WHERE status='completed'
+                """
+            ).fetchone()[0]
+
+            failed = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM bridge_commands
+                WHERE status='failed'
+                """
+            ).fetchone()[0]
+
+            latest_command = conn.execute(
+                """
+                SELECT command_id, action, status,
+                       attempts, created_at, updated_at
+                FROM bridge_commands
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+            latest_result = conn.execute(
+                """
+                SELECT result_id, command_id, action,
+                       success, result_json, created_at
+                FROM bridge_results
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        finally:
+
+            conn.close()
+
+        extension = get_latest_extension()
+
+        latest_command_data = (
+            dict(latest_command)
+            if latest_command
+            else None
         )
+
+        latest_result_data = None
+
+        if latest_result:
+
+            latest_result_data = dict(
+                latest_result
+            )
+
+            latest_result_data[
+                "result"
+            ] = json_loads_safe(
+                latest_result_data.get(
+                    "result_json"
+                ),
+                {}
+            )
+
+            latest_result_data.pop(
+                "result_json",
+                None
+            )
 
         return jsonify({
 
@@ -2811,10 +4095,46 @@ def extension_test_status():
             "service":
                 "extension_test_bridge",
 
-            **state,
+            "version":
+                "8.0",
+
+            "registered":
+                bool(extension),
+
+            "extension_online":
+                extension_is_online(),
+
+            "extension":
+                extension,
+
+            "queue":
+                {
+
+                    "queued":
+                        queued,
+
+                    "processing":
+                        processing,
+
+                    "completed":
+                        completed,
+
+                    "failed":
+                        failed
+
+                },
+
+            "latest_command":
+                latest_command_data,
+
+            "latest_result":
+                latest_result_data,
+
+            "supported_actions":
+                SUPPORTED_BRIDGE_ACTIONS,
 
             "timestamp":
-                datetime.now().isoformat()
+                now_iso()
 
         }), 200
 
@@ -2836,9 +4156,546 @@ def extension_test_status():
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 5: RUN (🔒 PRESERVED)
+# 51. COMMAND STATUS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
+@app.route(
+    "/extension/test/command/<command_id>",
+    methods=["GET"]
+)
+def extension_command_status(
+    command_id
+):
+
+    if not extension_test_authorized():
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
+        }), 401
+
+    try:
+
+        conn = db_connect()
+
+        try:
+
+            command = conn.execute(
+                """
+                SELECT *
+                FROM bridge_commands
+                WHERE command_id=?
+                """,
+                (command_id,)
+            ).fetchone()
+
+            if not command:
+
+                return jsonify({
+
+                    "success":
+                        False,
+
+                    "error":
+                        "Command not found"
+
+                }), 404
+
+            results = conn.execute(
+                """
+                SELECT *
+                FROM bridge_results
+                WHERE command_id=?
+                ORDER BY created_at DESC
+                """,
+                (command_id,)
+            ).fetchall()
+
+        finally:
+
+            conn.close()
+
+        command_data = dict(
+            command
+        )
+
+        command_data[
+            "payload"
+        ] = json_loads_safe(
+            command_data.get(
+                "payload_json"
+            ),
+            {}
+        )
+
+        command_data.pop(
+            "payload_json",
+            None
+        )
+
+        result_data = []
+
+        for row in results:
+
+            item = dict(row)
+
+            item[
+                "result"
+            ] = json_loads_safe(
+                item.get(
+                    "result_json"
+                ),
+                {}
+            )
+
+            item.pop(
+                "result_json",
+                None
+            )
+
+            result_data.append(
+                item
+            )
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "command":
+                command_data,
+
+            "results":
+                result_data
+
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 52. AUTOMATION SESSION CREATE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+@app.route(
+    "/automation/session",
+    methods=["POST"]
+)
+def automation_session_create():
+
+    if not extension_test_authorized():
+
+        # Session API ko abhi bridge token ke under rakha gaya hai.
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized"
+
+        }), 401
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        user_command = str(
+            data.get(
+                "command",
+                ""
+            )
+        ).strip()
+
+        if not user_command:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "error":
+                    "command is required"
+
+            }), 400
+
+        session_id = create_automation_session(
+            user_command=user_command,
+            title=data.get("title"),
+            plan=data.get("plan"),
+            extension_id=data.get(
+                "extension_id"
+            )
+        )
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "session_id":
+                session_id,
+
+            "status":
+                "RUNNING"
+
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 53. AUTOMATION SESSION STATUS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+@app.route(
+    "/automation/session/<session_id>",
+    methods=["GET"]
+)
+def automation_session_status(
+    session_id
+):
+
+    if not extension_test_authorized():
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized"
+
+        }), 401
+
+    try:
+
+        session = get_automation_session(
+            session_id
+        )
+
+        if not session:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "error":
+                    "Session not found"
+
+            }), 404
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "session":
+                session
+
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 54. AUTOMATION SESSION PAUSE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+@app.route(
+    "/automation/session/<session_id>/pause",
+    methods=["POST"]
+)
+def automation_session_pause(
+    session_id
+):
+
+    if not extension_test_authorized():
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized"
+
+        }), 401
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        reason = str(
+            data.get(
+                "reason",
+                "Paused by user"
+            )
+        )
+
+        update_automation_session(
+            session_id,
+            status="PAUSED",
+            pause_reason=reason
+        )
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "session_id":
+                session_id,
+
+            "status":
+                "PAUSED",
+
+            "reason":
+                reason
+
+        })
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 55. AUTOMATION SESSION RESUME
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+@app.route(
+    "/automation/session/<session_id>/resume",
+    methods=["POST"]
+)
+def automation_session_resume(
+    session_id
+):
+
+    if not extension_test_authorized():
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized"
+
+        }), 401
+
+    try:
+
+        session = get_automation_session(
+            session_id
+        )
+
+        if not session:
+
+            return jsonify({
+
+                "success":
+                    False,
+
+                "error":
+                    "Session not found"
+
+            }), 404
+
+        update_automation_session(
+            session_id,
+            status="RESUMING",
+            pause_reason=""
+        )
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "session_id":
+                session_id,
+
+            "status":
+                "RESUMING",
+
+            "current_step":
+                session.get(
+                    "current_step",
+                    0
+                ),
+
+            "current_action":
+                session.get(
+                    "current_action"
+                ),
+
+            "current_url":
+                session.get(
+                    "current_url"
+                ),
+
+            "checkpoint":
+                session.get(
+                    "checkpoint"
+                )
+
+        })
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 56. AUTOMATION CHECKPOINT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+@app.route(
+    "/automation/session/<session_id>/checkpoint",
+    methods=["POST"]
+)
+def automation_session_checkpoint(
+    session_id
+):
+
+    if not extension_test_authorized():
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized"
+
+        }), 401
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        current_step = int(
+            data.get(
+                "current_step",
+                0
+            )
+        )
+
+        current_action = str(
+            data.get(
+                "current_action",
+                ""
+            )
+        )
+
+        current_url = data.get(
+            "current_url"
+        )
+
+        snapshot = data.get(
+            "snapshot",
+            {}
+        )
+
+        checkpoint_id = save_automation_checkpoint(
+            session_id=session_id,
+            current_step=current_step,
+            current_action=current_action,
+            current_url=current_url,
+            snapshot=snapshot
+        )
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "checkpoint_id":
+                checkpoint_id,
+
+            "session_id":
+                session_id,
+
+            "current_step":
+                current_step
+
+        })
+
+    except Exception as e:
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
+        }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 57. RUN
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
 
@@ -2850,94 +4707,99 @@ if __name__ == "__main__":
 
 
 # ====================================================================================================
-# 📋 QUICK REFERENCE
+# 📋 QUICK REFERENCE - VERSION 8.0
 # ====================================================================================================
 #
 # BASIC:
 #
-#    GET  /
-#    GET  /health
-#    GET  /ping
-#    GET  /keep-alive
+# GET  /
+# GET  /health
+# GET  /ping
+# GET  /keep-alive
 #
 #
 # CHAT:
 #
-#    GET  /campaigns
-#    GET  /campaign/<campaign_id>
-#    POST /command
-#    POST /chat/<campaign_id>
+# GET  /campaigns
+# GET  /campaign/<campaign_id>
+# POST /command
+# POST /chat/<campaign_id>
 #
 #
 # CAMPAIGN:
 #
-#    POST   /campaign/rename/<campaign_id>
-#    DELETE /campaign/delete/<campaign_id>
-#    POST   /campaign/restore/<campaign_id>
+# POST   /campaign/rename/<campaign_id>
+# DELETE /campaign/delete/<campaign_id>
+# POST   /campaign/restore/<campaign_id>
 #
 #
 # BLOG:
 #
-#    GET  /blog/<slug>
-#    POST /blog/publish
-#    GET  /blogs
+# GET  /blog/<slug>
+# POST /blog/publish
+# GET  /blogs
 #
 #
 # IMAGE:
 #
-#    POST /chat/image
+# POST /chat/image
 #
 #
 # AUTOMATION:
 #
-#    POST /automation/start
-#    POST /automation/stop
-#    GET  /automation/status
-#    POST /automation/command
+# POST /automation/start
+# POST /automation/stop
+# GET  /automation/status
+# POST /automation/command
 #
 #
 # TASK:
 #
-#    POST /task/start
-#    POST /task/stop
-#    GET  /task/status
+# POST /task/start
+# POST /task/stop
+# GET  /task/status
 #
 #
-# KIWI EXTENSION BRIDGE:
+# KIWI BRIDGE:
 #
-#    GET  /extension/test/ping
-#    POST /extension/test/register
-#    POST /extension/test/command
-#    GET  /extension/test/next
-#    POST /extension/test/result
-#    GET  /extension/test/status
+# GET  /extension/test/ping
+# POST /extension/test/register
+# POST /extension/test/command
+# GET  /extension/test/next
+# POST /extension/test/result
+# GET  /extension/test/status
+# GET  /extension/test/command/<command_id>
+#
+#
+# AUTOMATION SESSION:
+#
+# POST /automation/session
+# GET  /automation/session/<session_id>
+# POST /automation/session/<session_id>/pause
+# POST /automation/session/<session_id>/resume
+# POST /automation/session/<session_id>/checkpoint
 #
 #
 # BRIDGE ACTIONS:
 #
-#    open
-#    search
-#
-#
-# SEARCH REQUEST:
-#
-#    {
-#        "action": "search",
-#        "query": "OpenAI",
-#        "engine": "google"
-#    }
-#
-#
-# SEARCH RESULT:
-#
-#    {
-#        "command_id": "...",
-#        "success": true,
-#        "action": "search",
-#        "query": "OpenAI",
-#        "engine": "google",
-#        "url": "...",
-#        "message": "..."
-#    }
+# open
+# search
+# scan
+# detect
+# find
+# find_element
+# click
+# click_by_text
+# type
+# extract
+# extract_text
+# page_info
+# wait_text
+# wait_for_text
+# wait_selector
+# wait_for_selector
+# screenshot
+# status
+# stop
 #
 # ====================================================================================================
