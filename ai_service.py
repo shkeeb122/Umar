@@ -1,7 +1,8 @@
 # ====================================================================================================
-# 📁 FILE: ai_service.py - SMART SYSTEM DESIGN
+# 📁 FILE: ai_service.py
 # 🎯 ROLE: BRAIN - Intent Detection + Response Generation + Kiwi Browser Bridge
 # ====================================================================================================
+#
 # ARCHITECTURE:
 #
 # USER
@@ -17,7 +18,13 @@
 # Kiwi Browser
 #
 # 🔒 ai_chat() CORE API FUNCTION IS LOCKED
+#
+# CURRENT BROWSER ACTIONS:
+#   ✅ open
+#   🆕 search (backend side ready; Kiwi background.js next)
+#
 # ====================================================================================================
+
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 1: IMPORTS
@@ -42,8 +49,10 @@ from helpers import is_question, format_response, extract_topic
 def ai_chat(messages, temperature=0.7, max_tokens=500):
     """
     🔒 CORE FUNCTION - DO NOT CHANGE
-    Mistral AI Chat Completion API - POST /v1/chat/completions
+
+    Mistral AI Chat Completion API
     """
+
     try:
         payload = {
             "model": MODEL_NAME,
@@ -78,9 +87,16 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
             ""
         )
 
-        print(f"✅ AI Response time: {time.time() - start_time:.2f}s")
+        print(
+            f"✅ AI Response time: "
+            f"{time.time() - start_time:.2f}s"
+        )
 
-        return response.strip() if response else "I'm not sure how to respond."
+        return (
+            response.strip()
+            if response
+            else "I'm not sure how to respond."
+        )
 
     except requests.exceptions.Timeout:
         return "⏰ Request timeout (15s). Please try again."
@@ -92,54 +108,75 @@ def ai_chat(messages, temperature=0.7, max_tokens=500):
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 2.5: KIWI EXTENSION BRIDGE
-# 🆕 NEW - Browser communication helper
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-# Render Environment Variable se token liya jayega.
-# Token ko source code mein hard-code nahi karna chahiye.
-EXTENSION_TEST_TOKEN = os.environ.get("EXTENSION_TEST_TOKEN", "")
+EXTENSION_TEST_TOKEN = os.environ.get(
+    "EXTENSION_TEST_TOKEN",
+    ""
+)
 
-# Bridge test endpoints
-EXTENSION_COMMAND_URL = f"{BACKEND_URL.rstrip('/')}/extension/test/command"
-EXTENSION_STATUS_URL = f"{BACKEND_URL.rstrip('/')}/extension/test/status"
+EXTENSION_COMMAND_URL = (
+    f"{BACKEND_URL.rstrip('/')}"
+    f"/extension/test/command"
+)
 
-# Browser command result ke liye maximum wait.
+EXTENSION_STATUS_URL = (
+    f"{BACKEND_URL.rstrip('/')}"
+    f"/extension/test/status"
+)
+
 EXTENSION_RESULT_TIMEOUT = 20
-
-# Polling interval
 EXTENSION_POLL_INTERVAL = 0.5
 
 
-def send_extension_command(action, url=None, extra_data=None):
+def send_extension_command(
+    action,
+    url=None,
+    extra_data=None
+):
     """
     🌉 Render → Kiwi Extension Bridge
 
-    Browser command ko existing working extension bridge par bhejta hai.
+    Supported now:
+        open
+        search
 
     Example:
+
         send_extension_command(
             action="open",
             url="https://www.google.com/"
         )
 
-    Returns:
-        {
-            "success": True/False,
-            "command_id": "...",
-            "message": "...",
-            ...
-        }
+    OR:
+
+        send_extension_command(
+            action="search",
+            extra_data={
+                "query": "OpenAI",
+                "engine": "google"
+            }
+        )
     """
 
     if not EXTENSION_TEST_TOKEN:
-        print("❌ EXTENSION_TEST_TOKEN is missing")
+
+        print(
+            "❌ EXTENSION_TEST_TOKEN is missing"
+        )
+
         return {
             "success": False,
-            "error": "EXTENSION_TEST_TOKEN is not configured on Render."
+            "error": (
+                "EXTENSION_TEST_TOKEN is not "
+                "configured on Render."
+            )
         }
 
     headers = {
-        "X-Extension-Test-Token": EXTENSION_TEST_TOKEN,
+        "X-Extension-Test-Token": (
+            EXTENSION_TEST_TOKEN
+        ),
         "Content-Type": "application/json"
     }
 
@@ -154,9 +191,13 @@ def send_extension_command(action, url=None, extra_data=None):
         payload.update(extra_data)
 
     try:
-        print("🌉 Sending command to Kiwi Extension:")
-        print(f"   Action: {action}")
-        print(f"   URL: {url}")
+
+        print("=" * 60)
+        print("🌉 KIWI EXTENSION BRIDGE")
+        print(f"Action: {action}")
+        print(f"URL: {url}")
+        print(f"Extra: {extra_data}")
+        print("=" * 60)
 
         response = requests.post(
             EXTENSION_COMMAND_URL,
@@ -166,44 +207,67 @@ def send_extension_command(action, url=None, extra_data=None):
         )
 
         if response.status_code != 200:
+
             print(
                 f"❌ Extension command failed: "
-                f"{response.status_code} - {response.text}"
+                f"{response.status_code}"
             )
 
             return {
                 "success": False,
-                "error": f"Bridge command failed with HTTP {response.status_code}"
+                "error": (
+                    "Bridge command failed with "
+                    f"HTTP {response.status_code}"
+                )
             }
 
         data = response.json()
 
         if not data.get("success"):
+
             return {
                 "success": False,
-                "error": data.get("message", "Command was not queued.")
+                "error": data.get(
+                    "message",
+                    "Command was not queued."
+                )
             }
 
-        command = data.get("command", {})
-        command_id = command.get("command_id")
+        command = data.get(
+            "command",
+            {}
+        )
+
+        command_id = command.get(
+            "command_id"
+        )
 
         if not command_id:
+
             return {
                 "success": False,
-                "error": "Bridge did not return a command_id."
+                "error": (
+                    "Bridge did not return "
+                    "a command_id."
+                )
             }
 
-        print(f"✅ Command queued: {command_id}")
+        print(
+            f"✅ Command queued: {command_id}"
+        )
 
-        # ------------------------------------------------------------
-        # Wait for Kiwi extension to execute the command.
-        # ------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # WAIT FOR KIWI RESULT
+        # ------------------------------------------------------------------
 
         start_time = time.time()
 
-        while (time.time() - start_time) < EXTENSION_RESULT_TIMEOUT:
+        while (
+            time.time() - start_time
+        ) < EXTENSION_RESULT_TIMEOUT:
 
             try:
+
                 status_response = requests.get(
                     EXTENSION_STATUS_URL,
                     headers=headers,
@@ -212,59 +276,101 @@ def send_extension_command(action, url=None, extra_data=None):
 
                 if status_response.status_code == 200:
 
-                    status_data = status_response.json()
+                    status_data = (
+                        status_response.json()
+                    )
 
-                    last_result = status_data.get("last_result")
+                    last_result = (
+                        status_data.get(
+                            "last_result"
+                        )
+                    )
 
-                    if isinstance(last_result, dict):
+                    if isinstance(
+                        last_result,
+                        dict
+                    ):
 
-                        returned_command_id = last_result.get("command_id")
+                        returned_command_id = (
+                            last_result.get(
+                                "command_id"
+                            )
+                        )
 
-                        if returned_command_id == command_id:
+                        if (
+                            returned_command_id
+                            == command_id
+                        ):
 
-                            print("✅ Kiwi Extension returned result.")
+                            print(
+                                "✅ Kiwi Extension "
+                                "returned result."
+                            )
 
                             return last_result
 
             except requests.exceptions.RequestException as poll_error:
-                print(f"⚠️ Bridge status polling error: {poll_error}")
 
-            time.sleep(EXTENSION_POLL_INTERVAL)
+                print(
+                    "⚠️ Bridge status "
+                    f"polling error: {poll_error}"
+                )
 
-        # ------------------------------------------------------------
-        # Timeout does NOT necessarily mean command failed.
-        # It may still be queued/executing.
-        # ------------------------------------------------------------
+            time.sleep(
+                EXTENSION_POLL_INTERVAL
+            )
 
         print(
-            f"⏳ Extension result timeout for command: {command_id}"
+            "⏳ Extension result timeout: "
+            f"{command_id}"
         )
 
         return {
             "success": False,
             "pending": True,
             "command_id": command_id,
-            "message": "Command was sent to Kiwi, but the browser result has not arrived yet."
+            "message": (
+                "Command was sent to Kiwi, "
+                "but browser result has "
+                "not arrived yet."
+            )
         }
 
     except requests.exceptions.Timeout:
-        print("⏰ Extension bridge request timed out.")
+
+        print(
+            "⏰ Extension bridge "
+            "request timed out."
+        )
 
         return {
             "success": False,
-            "error": "Extension bridge request timed out."
+            "error": (
+                "Extension bridge "
+                "request timed out."
+            )
         }
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ Extension bridge network error: {e}")
+
+        print(
+            f"❌ Extension bridge "
+            f"network error: {e}"
+        )
 
         return {
             "success": False,
-            "error": f"Extension bridge network error: {e}"
+            "error": (
+                f"Extension bridge "
+                f"network error: {e}"
+            )
         }
 
     except Exception as e:
-        print(f"❌ Extension bridge error: {e}")
+
+        print(
+            f"❌ Extension bridge error: {e}"
+        )
 
         return {
             "success": False,
@@ -278,15 +384,15 @@ def send_extension_command(action, url=None, extra_data=None):
 
 INTENT_REGISTRY = {
 
-    # ============================================================
-    # NORMAL AI INTENTS
-    # ============================================================
+    # ================================================================================================
+    # NORMAL AI
+    # ================================================================================================
 
     "chat": {
         "keywords": [],
         "handler": "handle_chat",
         "priority": 0,
-        "description": "Default chat - user ko normal response",
+        "description": "Default normal AI chat",
         "example": "Hello, kese ho?"
     },
 
@@ -300,7 +406,7 @@ INTENT_REGISTRY = {
         ],
         "handler": "handle_count_questions",
         "priority": 1,
-        "description": "Count total questions asked",
+        "description": "Count total questions",
         "example": "Maine kitne sawal kiye?"
     },
 
@@ -348,7 +454,7 @@ INTENT_REGISTRY = {
         ],
         "handler": "handle_blog",
         "priority": 1,
-        "description": "Generate blog post",
+        "description": "Generate blog",
         "example": "Blog banao car ke baare mein"
     },
 
@@ -368,19 +474,29 @@ INTENT_REGISTRY = {
         "example": "Is image mein kya hai?"
     },
 
+    # ================================================================================================
+    # REAL BROWSER SEARCH
+    # ================================================================================================
+
     "search": {
         "keywords": [
-            "search",
             "search karo",
+            "search",
             "google search",
+            "google par",
+            "google mein",
             "pata karo",
+            "pata lagao",
             "khojo",
+            "khoj",
+            "dhundo",
+            "dhoondo",
             "find"
         ],
         "handler": "handle_search",
-        "priority": 1,
-        "description": "Web search",
-        "example": "Google search karo AI ke baare mein"
+        "priority": 5,
+        "description": "Real web search through Kiwi Browser",
+        "example": "Google search karo OpenAI"
     },
 
     "translate": {
@@ -430,10 +546,9 @@ INTENT_REGISTRY = {
         "example": "Is article ka summary do"
     },
 
-
-    # ============================================================
-    # SMART WEBSITE MASTER
-    # ============================================================
+    # ================================================================================================
+    # SMART WEBSITE / AUTOMATION
+    # ================================================================================================
 
     "smart_task": {
         "keywords": [
@@ -462,16 +577,16 @@ INTENT_REGISTRY = {
         ],
         "handler": "handle_smart_task",
         "priority": 3,
-        "description": "Automation Trigger",
+        "description": "Automation trigger",
         "example": "Task start karo"
     },
 
     "smart_open": {
         "keywords": [
-            "open",
-            "kholo",
             "website kholo",
             "website open",
+            "kholo",
+            "open",
             "jao",
             "browser",
             "google open",
@@ -482,8 +597,8 @@ INTENT_REGISTRY = {
             "github open"
         ],
         "handler": "handle_smart_open",
-        "priority": 3,
-        "description": "Website open karo via Kiwi",
+        "priority": 4,
+        "description": "Open website through Kiwi",
         "example": "Google kholo"
     },
 
@@ -508,23 +623,24 @@ INTENT_REGISTRY = {
         ],
         "handler": "handle_smart_status",
         "priority": 2,
-        "description": "System status batao",
+        "description": "System status",
         "example": "Status kya hai?"
     },
 
     "smart_stop": {
         "keywords": [
-            "stop",
-            "band karo",
-            "rok",
-            "halt",
             "automation band",
-            "task stop"
+            "task stop",
+            "band karo",
+            "stop",
+            "rok do",
+            "rok",
+            "halt"
         ],
         "handler": "handle_smart_stop",
-        "priority": 4,
-        "description": "Automation stop karo",
-        "example": "Band karo"
+        "priority": 6,
+        "description": "Stop automation",
+        "example": "Automation band karo"
     }
 }
 
@@ -533,25 +649,35 @@ INTENT_REGISTRY = {
 # LAYER 4: NORMAL AI HANDLERS
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-def handle_chat(message, history, all_history, campaign_id=None, **kwargs):
+def handle_chat(
+    message,
+    history,
+    all_history,
+    campaign_id=None,
+    **kwargs
+):
 
     if not history:
         history = []
 
-    current_date = datetime.now().strftime("%d %B %Y")
+    current_date = datetime.now().strftime(
+        "%d %B %Y"
+    )
 
     messages = [
         {
             "role": "system",
             "content": (
-                f"You are a helpful AI assistant. "
+                "You are a helpful AI assistant. "
                 f"Today's date is {current_date}. "
-                f"Respond in Hindi or English."
+                "Respond in Hindi or English."
             )
         }
     ]
 
-    messages.extend(history[-10:])
+    messages.extend(
+        history[-10:]
+    )
 
     messages.append({
         "role": "user",
@@ -572,8 +698,14 @@ def handle_count_questions(
     campaign_id=None,
     **kwargs
 ):
-    count = count_questions(campaign_id)
-    return f"📊 Total questions: {count}"
+
+    count = count_questions(
+        campaign_id
+    )
+
+    return (
+        f"📊 Total questions: {count}"
+    )
 
 
 def handle_recall(
@@ -585,15 +717,29 @@ def handle_recall(
 ):
 
     if not campaign_id:
-        return "No chat history found. Start a new chat first!"
+        return (
+            "No chat history found. "
+            "Start a new chat first!"
+        )
 
-    recent = get_recent_history(campaign_id, 20)
+    recent = get_recent_history(
+        campaign_id,
+        20
+    )
 
     if not recent:
-        return "I don't remember anything."
+        return (
+            "I don't remember anything."
+        )
 
-    return "📜 Previous:\n" + "\n".join(
-        [f"• {q['content']}" for q in recent]
+    return (
+        "📜 Previous:\n"
+        + "\n".join(
+            [
+                f"• {q['content']}"
+                for q in recent
+            ]
+        )
     )
 
 
@@ -604,7 +750,11 @@ def handle_follow_up(
     campaign_id=None,
     **kwargs
 ):
-    return "Tell me more about what you'd like to know."
+
+    return (
+        "Tell me more about what "
+        "you'd like to know."
+    )
 
 
 def handle_blog(
@@ -615,14 +765,19 @@ def handle_blog(
     **kwargs
 ):
 
-    topic = extract_topic(message)
+    topic = extract_topic(
+        message
+    )
 
     if not topic:
-        return "📝 What topic for blog?"
+        return (
+            "📝 What topic for blog?"
+        )
 
     system = (
-        f"You are an expert writer. "
-        f"Create a detailed, engaging blog post about: {topic}"
+        "You are an expert writer. "
+        "Create a detailed, engaging "
+        f"blog post about: {topic}"
     )
 
     messages = [
@@ -655,13 +810,16 @@ def handle_image(
     if not image_url:
         return (
             "Please provide an image URL. "
-            "Example: image samjhao https://example.com/photo.jpg"
+            "Example: image samjhao "
+            "https://example.com/photo.jpg"
         )
 
     content = [
         {
             "type": "text",
-            "text": "Describe this image in detail."
+            "text": (
+                "Describe this image in detail."
+            )
         },
         {
             "type": "image_url",
@@ -683,6 +841,159 @@ def handle_image(
     )
 
 
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# 🔎 REAL SEARCH HANDLER
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+def extract_search_query(message):
+    """
+    Advanced search query extractor.
+
+    Examples:
+
+        Google search karo OpenAI
+        → OpenAI
+
+        Search karo Python automation
+        → Python automation
+
+        OpenAI search karo
+        → OpenAI
+
+        Google par OpenAI khojo
+        → OpenAI
+
+        Google mein Python ke baare mein search karo
+        → Python ke baare mein
+
+    """
+
+    if not message:
+        return ""
+
+    query = message.strip()
+
+    # ------------------------------------------------------------------
+    # Normalize spaces
+    # ------------------------------------------------------------------
+
+    query = re.sub(
+        r'\s+',
+        ' ',
+        query
+    ).strip()
+
+    # ------------------------------------------------------------------
+    # Strong command phrases FIRST
+    # ------------------------------------------------------------------
+
+    command_patterns = [
+
+        r'^\s*google\s+search\s+kar(?:o|na)?\s*',
+
+        r'^\s*google\s+par\s+search\s+kar(?:o|na)?\s*',
+
+        r'^\s*google\s+mein\s+search\s+kar(?:o|na)?\s*',
+
+        r'^\s*search\s+kar(?:o|na)?\s*',
+
+        r'^\s*google\s+par\s*',
+
+        r'^\s*google\s+mein\s*',
+
+        r'^\s*google\s*',
+
+    ]
+
+    for pattern in command_patterns:
+
+        new_query = re.sub(
+            pattern,
+            '',
+            query,
+            count=1,
+            flags=re.IGNORECASE
+        )
+
+        if new_query != query:
+
+            query = new_query.strip()
+            break
+
+    # ------------------------------------------------------------------
+    # Trailing command phrases
+    # ------------------------------------------------------------------
+
+    trailing_patterns = [
+
+        r'\s+google\s+par\s+search\s+kar(?:o|na)?\s*$',
+
+        r'\s+google\s+mein\s+search\s+kar(?:o|na)?\s*$',
+
+        r'\s+search\s+kar(?:o|na)?\s*$',
+
+        r'\s+google\s+search\s*$',
+
+        r'\s+search\s*$',
+
+        r'\s+khoj(?:o|na)?\s*$',
+
+        r'\s+dhund(?:o|na)?\s*$',
+
+        r'\s+dhoond(?:o|na)?\s*$',
+
+        r'\s+pata\s+kar(?:o|na)?\s*$',
+
+        r'\s+find\s*$',
+
+    ]
+
+    for pattern in trailing_patterns:
+
+        query = re.sub(
+            pattern,
+            '',
+            query,
+            count=1,
+            flags=re.IGNORECASE
+        ).strip()
+
+    # ------------------------------------------------------------------
+    # Standalone filler words
+    # ------------------------------------------------------------------
+
+    query = re.sub(
+        r'\b(search|searching|google)\b',
+        ' ',
+        query,
+        flags=re.IGNORECASE
+    )
+
+    # Hindi command fillers
+    query = re.sub(
+        r'\b(?:karo|karna|karein|kijiye)\b',
+        ' ',
+        query,
+        flags=re.IGNORECASE
+    )
+
+    # ------------------------------------------------------------------
+    # Clean punctuation
+    # ------------------------------------------------------------------
+
+    query = re.sub(
+        r'\s+',
+        ' ',
+        query
+    ).strip()
+
+    query = query.strip(
+        " \t\n\r.,!?;:'\"“”‘’()[]{}"
+    )
+
+    return query
+
+
 def handle_search(
     message,
     history,
@@ -690,22 +1001,122 @@ def handle_search(
     campaign_id=None,
     **kwargs
 ):
+    """
+    🔎 REAL KIWI SEARCH
 
-    query = re.sub(
-        r'(google search|search karo|search|pata karo|khojo|find)',
-        '',
-        message,
-        flags=re.IGNORECASE
-    ).strip()
+    Render
+      ↓
+    search intent
+      ↓
+    extract query
+      ↓
+    Extension Bridge
+      ↓
+    Kiwi
+      ↓
+    Google
+    """
 
-    if not query:
-        return "What would you like to search for?"
-
-    return (
-        f"🔍 Searching for: '{query}'\n\n"
-        "(Search integration coming soon.)"
+    original_message = (
+        message or ""
     )
 
+    query = extract_search_query(
+        original_message
+    )
+
+    if not query:
+
+        return (
+            "🔎 Kya search karna hai?\n"
+            "Example: Google search karo OpenAI"
+        )
+
+    print("=" * 70)
+    print("🔎 REAL KIWI SEARCH")
+    print(f"Original message: {original_message}")
+    print(f"Extracted query:  {query}")
+    print("=" * 70)
+
+    # ------------------------------------------------------------------
+    # Send real browser command
+    # ------------------------------------------------------------------
+
+    result = send_extension_command(
+        action="search",
+        extra_data={
+            "query": query,
+            "engine": "google"
+        }
+    )
+
+    # ------------------------------------------------------------------
+    # SUCCESS
+    # ------------------------------------------------------------------
+
+    if result.get("success"):
+
+        result_url = result.get(
+            "url",
+            ""
+        )
+
+        if result_url:
+
+            return (
+                "✅ Google search complete.\n"
+                f"🔎 Search: {query}\n"
+                f"🌐 {result_url}"
+            )
+
+        return (
+            "✅ Google search complete.\n"
+            f"🔎 Search: {query}"
+        )
+
+    # ------------------------------------------------------------------
+    # PENDING
+    # ------------------------------------------------------------------
+
+    if result.get("pending"):
+
+        command_id = result.get(
+            "command_id",
+            "unknown"
+        )
+
+        return (
+            "⏳ Search command Kiwi ko "
+            "bhej di gayi hai.\n"
+            f"🔎 Search: {query}\n"
+            f"🆔 Command: {command_id}\n"
+            "⚠️ Browser result abhi "
+            "receive nahi hua."
+        )
+
+    # ------------------------------------------------------------------
+    # ERROR
+    # ------------------------------------------------------------------
+
+    error = result.get(
+        "error",
+        result.get(
+            "message",
+            "Unknown extension error."
+        )
+    )
+
+    return (
+        "❌ Google search start "
+        "nahi ho saki.\n"
+        f"🔎 Search: {query}\n"
+        f"⚠️ {error}"
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# TRANSLATE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def handle_translate(
     message,
@@ -716,21 +1127,30 @@ def handle_translate(
 ):
 
     text = re.sub(
-        r'(translate|anuvad|convert language|translate karo|'
-        r'bhasha badlo|language change)',
+        r'(translate|anuvad|convert language|'
+        r'translate karo|bhasha badlo|'
+        r'language change)',
         '',
         message,
         flags=re.IGNORECASE
     ).strip()
 
     if not text:
-        return "क्या translate करना है? / What would you like to translate?"
+
+        return (
+            "क्या translate करना है? / "
+            "What would you like to translate?"
+        )
 
     return (
         f"🔤 Translation: '{text}'\n\n"
         "(Translation integration coming soon.)"
     )
 
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# CODE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def handle_code(
     message,
@@ -741,22 +1161,26 @@ def handle_code(
 ):
 
     prompt = re.sub(
-        r'(code|program|function|script|code likho|'
-        r'program banao|programming)',
+        r'(code|program|function|script|'
+        r'code likho|program banao|programming)',
         '',
         message,
         flags=re.IGNORECASE
     ).strip()
 
     if not prompt:
+
         return (
-            "What code would you like me to write? "
-            "Example: Python code likho calculator ke liye"
+            "What code would you like me to write?\n"
+            "Example: Python code likho "
+            "calculator ke liye"
         )
 
     system = (
-        f"You are an expert programmer. "
-        f"Write clean, efficient, well-commented code for: {prompt}"
+        "You are an expert programmer. "
+        "Write clean, efficient, "
+        "well-commented code for: "
+        f"{prompt}"
     )
 
     messages = [
@@ -773,6 +1197,10 @@ def handle_code(
     )
 
 
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# SUMMARIZE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
 def handle_summarize(
     message,
     history,
@@ -782,20 +1210,24 @@ def handle_summarize(
 ):
 
     text = re.sub(
-        r'(summary|summarize|sankshep|short|shorten|short summary|summarise)',
+        r'(summary|summarize|sankshep|'
+        r'short|shorten|short summary|summarise)',
         '',
         message,
         flags=re.IGNORECASE
     ).strip()
 
     if not text:
+
         return (
-            "What would you like me to summarize? "
+            "What would you like me to summarize?\n"
             "Example: Is article ka summary do: [text]"
         )
 
     system = (
-        f"Summarize the following text concisely and clearly:\n\n{text}"
+        "Summarize the following text "
+        "concisely and clearly:\n\n"
+        f"{text}"
     )
 
     messages = [
@@ -813,7 +1245,7 @@ def handle_summarize(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 4: SMART WEBSITE MASTER HANDLERS
+# LAYER 4.5: SMART WEBSITE MASTER
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def handle_smart_task(
@@ -824,8 +1256,10 @@ def handle_smart_task(
     **kwargs
 ):
     """
-    🚀 Existing SmartMain automation.
-    Abhi unchanged rakha gaya hai.
+    Existing SmartMain automation.
+
+    ⚠️ Browser automation architecture will
+    later move toward Kiwi Extension.
     """
 
     try:
@@ -836,44 +1270,57 @@ def handle_smart_task(
 
         platform = "rapidworkers"
 
-        message_lower = message.lower()
+        message_lower = (
+            message.lower()
+        )
 
         if "timebucks" in message_lower:
+
             platform = "timebucks"
 
         elif "freecash" in message_lower:
+
             platform = "freecash"
 
         elif "swagbucks" in message_lower:
+
             platform = "swagbucks"
 
         elif "ysense" in message_lower:
+
             platform = "ysense"
 
         elif "prizerebel" in message_lower:
+
             platform = "prizerebel"
 
         elif "grabpoints" in message_lower:
+
             platform = "grabpoints"
 
-        result = system.run(f"{platform} task")
+        result = system.run(
+            f"{platform} task"
+        )
 
         return result
 
     except ImportError as e:
 
         return (
-            f"⚠️ SmartMain not found. "
-            f"Please ensure main.py is present. Error: {e}"
+            "⚠️ SmartMain not found. "
+            "Please ensure main.py is present. "
+            f"Error: {e}"
         )
 
     except Exception as e:
 
-        return f"❌ Error: {str(e)}"
+        return (
+            f"❌ Error: {str(e)}"
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# 🆕 SMART OPEN → REAL KIWI BROWSER
+# SMART OPEN → REAL KIWI BROWSER
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def handle_smart_open(
@@ -886,23 +1333,22 @@ def handle_smart_open(
     """
     🌐 Smart Website Open
 
-    AI Brain:
-        message
-          ↓
-        URL detect
-          ↓
-        Render Extension Bridge
-          ↓
-        Kiwi Extension
-          ↓
-        Browser opens URL
+    Render
+      ↓
+    Extension Bridge
+      ↓
+    Kiwi
+      ↓
+    Browser
     """
 
-    message_lower = message.lower()
+    message_lower = (
+        message.lower()
+    )
 
-    # ------------------------------------------------------------
-    # 1. Direct URL detect
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 1. DIRECT URL
+    # ------------------------------------------------------------------
 
     urls = re.findall(
         r'(https?://[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-z]{2,})',
@@ -915,46 +1361,78 @@ def handle_smart_open(
 
         url = urls[0]
 
-        # Remove common trailing punctuation
-        url = url.rstrip(".,!?;:)]}")
+        url = url.rstrip(
+            ".,!?;:)]}"
+        )
 
-        if not url.startswith("http"):
-            url = "https://" + url
+        if not url.startswith(
+            "http"
+        ):
 
-    # ------------------------------------------------------------
-    # 2. Website name → URL
-    # ------------------------------------------------------------
+            url = (
+                "https://" + url
+            )
+
+    # ------------------------------------------------------------------
+    # 2. WEBSITE MAP
+    # ------------------------------------------------------------------
 
     if not url:
 
         website_map = {
-            "google": "https://www.google.com/",
-            "youtube": "https://www.youtube.com/",
-            "facebook": "https://www.facebook.com/",
-            "amazon": "https://www.amazon.in/",
-            "flipkart": "https://www.flipkart.com/",
-            "github": "https://github.com/",
-            "rapidworkers": "https://rapidworkers.com/",
-            "timebucks": "https://timebucks.com/",
-            "freecash": "https://freecash.com/",
-            "swagbucks": "https://www.swagbucks.com/",
-            "ysense": "https://www.ysense.com/"
+
+            "google":
+                "https://www.google.com/",
+
+            "youtube":
+                "https://www.youtube.com/",
+
+            "facebook":
+                "https://www.facebook.com/",
+
+            "amazon":
+                "https://www.amazon.in/",
+
+            "flipkart":
+                "https://www.flipkart.com/",
+
+            "github":
+                "https://github.com/",
+
+            "rapidworkers":
+                "https://rapidworkers.com/",
+
+            "timebucks":
+                "https://timebucks.com/",
+
+            "freecash":
+                "https://freecash.com/",
+
+            "swagbucks":
+                "https://www.swagbucks.com/",
+
+            "ysense":
+                "https://www.ysense.com/"
         }
 
-        for site_name, site_url in website_map.items():
+        for (
+            site_name,
+            site_url
+        ) in website_map.items():
 
             if site_name in message_lower:
+
                 url = site_url
                 break
 
-    # ------------------------------------------------------------
-    # 3. URL nahi mila
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 3. URL NOT FOUND
+    # ------------------------------------------------------------------
 
     if not url:
 
         return (
-            "🌐 Kaunsi website open karni hai? "
+            "🌐 Kaunsi website open karni hai?\n"
             "Example: Google kholo"
         )
 
@@ -964,46 +1442,55 @@ def handle_smart_open(
     print(f"URL: {url}")
     print("=" * 60)
 
-    # ------------------------------------------------------------
-    # 4. Send actual command to Kiwi
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 4. SEND TO KIWI
+    # ------------------------------------------------------------------
 
     result = send_extension_command(
         action="open",
         url=url
     )
 
-    # ------------------------------------------------------------
-    # 5. Successful browser result
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 5. SUCCESS
+    # ------------------------------------------------------------------
 
     if result.get("success"):
 
-        opened_url = result.get("url", url)
+        opened_url = result.get(
+            "url",
+            url
+        )
 
         return (
-            f"✅ Website successfully open ho gayi.\n"
+            "✅ Website successfully "
+            "open ho gayi.\n"
             f"🌐 {opened_url}"
         )
 
-    # ------------------------------------------------------------
-    # 6. Command sent but result not returned yet
-    # ------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 6. PENDING
+    # ------------------------------------------------------------------
 
     if result.get("pending"):
 
-        command_id = result.get("command_id", "unknown")
-
-        return (
-            f"⏳ Command Kiwi ko bhej di gayi hai.\n"
-            f"🌐 {url}\n"
-            f"🆔 Command: {command_id}\n"
-            f"⚠️ Browser result abhi receive nahi hua."
+        command_id = result.get(
+            "command_id",
+            "unknown"
         )
 
-    # ------------------------------------------------------------
-    # 7. Error
-    # ------------------------------------------------------------
+        return (
+            "⏳ Command Kiwi ko bhej di "
+            "gayi hai.\n"
+            f"🌐 {url}\n"
+            f"🆔 Command: {command_id}\n"
+            "⚠️ Browser result abhi "
+            "receive nahi hua."
+        )
+
+    # ------------------------------------------------------------------
+    # 7. ERROR
+    # ------------------------------------------------------------------
 
     error = result.get(
         "error",
@@ -1014,11 +1501,15 @@ def handle_smart_open(
     )
 
     return (
-        f"❌ Website open nahi ho saki.\n"
+        "❌ Website open nahi ho saki.\n"
         f"🌐 {url}\n"
         f"⚠️ {error}"
     )
 
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# SMART STATUS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def handle_smart_status(
     message,
@@ -1027,9 +1518,6 @@ def handle_smart_status(
     campaign_id=None,
     **kwargs
 ):
-    """
-    📊 Existing system status.
-    """
 
     try:
 
@@ -1064,6 +1552,10 @@ def handle_smart_status(
 """
 
 
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# SMART STOP
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
 def handle_smart_stop(
     message,
     history,
@@ -1071,10 +1563,6 @@ def handle_smart_stop(
     campaign_id=None,
     **kwargs
 ):
-    """
-    🛑 Existing stop response.
-    Actual Kiwi stop command later add karenge.
-    """
 
     return (
         "🛑 Automation stopped! "
@@ -1083,84 +1571,128 @@ def handle_smart_stop(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 5: SMART ROUTER
+# LAYER 5: SMART INTENT ROUTER
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-def detect_intent(text, history=None):
+def detect_intent(
+    text,
+    history=None
+):
     """
-    🧠 Improved intent detection.
+    🧠 Advanced intent detection.
 
-    Old system:
-        First matching keyword = intent
+    Scoring:
 
-    New system:
-        1. Har intent ke matching keywords count karega
-        2. Priority consider karega
-        3. Highest score choose karega
+        keyword matches
+        +
+        priority
+        +
+        keyword length
 
-    Isse:
-        "Google kholo"
+    Examples:
+
+        Google kholo
         → smart_open
 
-        "Google search karo AI"
+        Google search karo OpenAI
         → search
+
+        Task start karo
+        → smart_task
     """
 
     if not text:
+
         return "chat"
 
-    text_lower = text.lower().strip()
+    text_lower = (
+        text.lower()
+        .strip()
+    )
 
     candidates = []
 
-    for intent_name, config in INTENT_REGISTRY.items():
+    for (
+        intent_name,
+        config
+    ) in INTENT_REGISTRY.items():
 
         if intent_name == "chat":
             continue
 
-        keywords = config.get("keywords", [])
+        keywords = config.get(
+            "keywords",
+            []
+        )
 
-        priority = config.get("priority", 0)
+        priority = config.get(
+            "priority",
+            0
+        )
 
         matched_keywords = []
 
         for keyword in keywords:
 
-            keyword_lower = keyword.lower()
-
-            if keyword_lower in text_lower:
-                matched_keywords.append(keyword)
-
-        if matched_keywords:
-
-            # Base score:
-            # Har matched keyword = 10 points
-            score = len(matched_keywords) * 10
-
-            # Priority ka controlled effect
-            score += priority
-
-            # Longer keyword ko extra importance
-            # Example:
-            # "google search" > "google"
-            longest_keyword = max(
-                [len(k) for k in matched_keywords],
-                default=0
+            keyword_lower = (
+                keyword.lower()
             )
 
-            score += longest_keyword / 100
+            # Exact word/phrase matching
+            if keyword_lower in text_lower:
 
-            candidates.append({
-                "intent": intent_name,
-                "score": score,
-                "priority": priority,
-                "matched": matched_keywords
-            })
+                matched_keywords.append(
+                    keyword
+                )
+
+        if not matched_keywords:
+
+            continue
+
+        # ------------------------------------------------------------------
+        # SCORE
+        # ------------------------------------------------------------------
+
+        score = (
+            len(matched_keywords)
+            * 10
+        )
+
+        score += (
+            priority * 2
+        )
+
+        longest_keyword = max(
+            [
+                len(k)
+                for k in matched_keywords
+            ],
+            default=0
+        )
+
+        score += (
+            longest_keyword / 100
+        )
+
+        candidates.append({
+
+            "intent":
+                intent_name,
+
+            "score":
+                score,
+
+            "priority":
+                priority,
+
+            "matched":
+                matched_keywords
+        })
 
     if not candidates:
+
         return "chat"
 
-    # Highest score first
     candidates.sort(
         key=lambda item: (
             item["score"],
@@ -1172,28 +1704,42 @@ def detect_intent(text, history=None):
     selected = candidates[0]
 
     print(
-        f"🧠 Intent: {selected['intent']} "
-        f"| Score: {selected['score']:.2f} "
-        f"| Matched: {selected['matched']}"
+        "🧠 Intent: "
+        f"{selected['intent']} "
+        f"| Score: "
+        f"{selected['score']:.2f} "
+        f"| Matched: "
+        f"{selected['matched']}"
     )
 
-    return selected["intent"]
+    return selected[
+        "intent"
+    ]
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 5.5: HANDLER ROUTER
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-def get_handler(intent_name):
+def get_handler(
+    intent_name
+):
 
     if intent_name in INTENT_REGISTRY:
 
-        handler_name = INTENT_REGISTRY[intent_name].get(
-            "handler"
+        handler_name = (
+            INTENT_REGISTRY[
+                intent_name
+            ].get(
+                "handler"
+            )
         )
 
         if handler_name:
-            return globals().get(handler_name)
+
+            return globals().get(
+                handler_name
+            )
 
     return None
 
@@ -1206,7 +1752,9 @@ def generate_response(
     campaign_id=None
 ):
 
-    handler = get_handler(intent)
+    handler = get_handler(
+        intent
+    )
 
     if handler:
 
@@ -1221,10 +1769,13 @@ def generate_response(
 
         except Exception as e:
 
-            print(f"❌ Handler error: {e}")
+            print(
+                f"❌ Handler error: {e}"
+            )
 
             return (
-                f"⚠️ Error processing request: {str(e)}"
+                "⚠️ Error processing "
+                f"request: {str(e)}"
             )
 
     return handle_chat(
@@ -1236,20 +1787,34 @@ def generate_response(
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 6: INIT
-# 🔒 Existing initialization
+# LAYER 6: INITIALIZATION
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 print("=" * 70)
-print("🧠 AI SERVICE LOADED - SMART INTENT REGISTRY ACTIVE")
-print("🌉 KIWI EXTENSION BRIDGE ENABLED")
+print(
+    "🧠 AI SERVICE LOADED - "
+    "SMART INTENT REGISTRY ACTIVE"
+)
+print(
+    "🌉 KIWI EXTENSION BRIDGE ENABLED"
+)
+print(
+    "🔎 REAL SEARCH HANDLER ENABLED"
+)
 print("=" * 70)
 
 print("📋 Registered Intents:")
 
-for name, config in INTENT_REGISTRY.items():
+for (
+    name,
+    config
+) in INTENT_REGISTRY.items():
 
-    status = "✅" if config.get("keywords") else "📌"
+    status = (
+        "✅"
+        if config.get("keywords")
+        else "📌"
+    )
 
     print(
         f"  {status} {name}: "
@@ -1257,11 +1822,24 @@ for name, config in INTENT_REGISTRY.items():
     )
 
     print(
-        f"      → {config.get('example', 'No example')}"
+        "      → "
+        f"{config.get('example', 'No example')}"
     )
 
 print("=" * 70)
-print("🔵 Add/Remove Intents: INTENT_REGISTRY + HANDLERS")
-print("🔒 Core (ai_chat): NEVER CHANGE")
-print("🌐 Smart Open: Render → Kiwi → Browser")
+print(
+    "🔵 Add/Remove Intents: "
+    "INTENT_REGISTRY + HANDLERS"
+)
+print(
+    "🔒 Core (ai_chat): NEVER CHANGE"
+)
+print(
+    "🌐 Smart Open: "
+    "Render → Kiwi → Browser"
+)
+print(
+    "🔎 Smart Search: "
+    "Render → Kiwi → Google"
+)
 print("=" * 70)
