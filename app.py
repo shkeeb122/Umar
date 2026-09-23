@@ -1,20 +1,34 @@
 # ====================================================================================================
 # 📁 FILE: app.py - SMART SYSTEM DESIGN
 # 🎯 ROLE: BOSS - Route Handler + API Server
+# 🔥 VERSION: 7.1 - KIWI EXTENSION BRIDGE + SEARCH FIX
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-# 📋 ARCHITECTURE: Router + Controller Pattern
-# 🔧 UPDATE GUIDE - HOW TO MODIFY:
-# ════════════════════════════════════════════════════════════════════════════════════════════════════
-#   🔵 Add New Route: LAYER 4 mein naya @app.route() function add karo
-#   🔵 Remove Route: ❌ MAT KARO! (Frontend break ho sakta hai)
-#   🔵 Update Controller: LAYER 3 mein helper function edit karo
-#   🔒 NEVER CHANGE: LAYER 2 (App Setup) + LAYER 5 (Run)
-# ════════════════════════════════════════════════════════════════════════════════════════════════════
-# ⚠️ RULES:
-#   1. Setup + Run kabhi change mat karo
-#   2. Routes sirf ADD KARO, REMOVE MAT KARO
-#   3. Controllers (helpers) mein changes allowed
-#   4. Naya route add karna hai toh template use karo
+#
+# ARCHITECTURE:
+#
+# User / Vercel
+#      ↓
+# Render Flask
+#      ↓
+# AI Service
+#      ↓
+# Extension Test Bridge
+#      ↓
+# Kiwi Extension
+#      ↓
+# Browser
+#      ↓
+# Kiwi Extension
+#      ↓
+# Render
+#
+# EXISTING ROUTES:
+#    PRESERVED
+#
+# EXTENSION BRIDGE:
+#    open
+#    search
+#
 # ====================================================================================================
 
 
@@ -24,6 +38,7 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
 import uuid
 from datetime import datetime
 import time
@@ -32,6 +47,7 @@ import sqlite3
 import threading
 import secrets
 
+
 from config import BACKEND_URL
 from db import *
 from helpers import *
@@ -39,18 +55,20 @@ from ai_service import detect_intent, generate_response, ai_chat
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 2: APP SETUP (🔒 NEVER CHANGE!)
-# ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# ⚠️ WARNING: Ye system ka foundation hai. Kabhi change mat karo!
+# LAYER 2: APP SETUP (🔒 PRESERVED)
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
 CORS(app)
+
 init_db()
+
 cursor = get_cursor()
+
 start_time = time.time()
 
-# Global orchestrator instance (Now using SmartMain)
+
+# Global orchestrator instance
 _orchestrator = None
 _orchestrator_thread = None
 _orchestrator_running = False
@@ -63,39 +81,55 @@ _orchestrator_running = False
 
 def check_database():
     """Check if database is accessible"""
+
     try:
+
         cursor.execute("SELECT 1")
         cursor.fetchone()
+
         return True, "connected"
-    except:
+
+    except Exception:
+
         return False, "disconnected"
 
 
 def get_uptime():
     """Get server uptime in seconds"""
-    return int(time.time() - start_time)
+
+    return int(
+        time.time() - start_time
+    )
 
 
-def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
+def save_messages_batch(
+    campaign_id,
+    user_msg,
+    assistant_msg,
+    is_ques,
+    now
+):
     """
-    🔥 Batch write - 3 writes in one transaction
-    3x faster than individual writes
+    Batch write:
+    User message
+    Assistant message
+    Campaign update
 
-    Parameters:
-        campaign_id (str): Chat ID
-        user_msg (str): User message
-        assistant_msg (str): Assistant message
-        is_ques (int): 1 if question else 0
-        now (str): ISO timestamp
-
-    Returns:
-        int: New question count
+    All in one transaction.
     """
-    conn = sqlite3.connect("ai_system.db")
+
+    conn = sqlite3.connect(
+        "ai_system.db"
+    )
+
     c = conn.cursor()
 
     try:
-        # 1. User message
+
+        # ------------------------------------------------
+        # 1. USER MESSAGE
+        # ------------------------------------------------
+
         c.execute(
             "INSERT INTO messages "
             "(id, campaign_id, role, content, is_question, timestamp) "
@@ -110,7 +144,10 @@ def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
             )
         )
 
-        # 2. Assistant message
+        # ------------------------------------------------
+        # 2. ASSISTANT MESSAGE
+        # ------------------------------------------------
+
         c.execute(
             "INSERT INTO messages "
             "(id, campaign_id, role, content, is_question, timestamp) "
@@ -125,12 +162,23 @@ def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
             )
         )
 
-        # 3. Update campaign
-        new_count = count_questions(campaign_id)
+        # ------------------------------------------------
+        # 3. QUESTION COUNT
+        # ------------------------------------------------
+
+        new_count = count_questions(
+            campaign_id
+        )
+
+        # ------------------------------------------------
+        # 4. CAMPAIGN UPDATE
+        # ------------------------------------------------
 
         c.execute(
             "UPDATE campaigns "
-            "SET updated_at=?, message_count=message_count+2, question_count=? "
+            "SET updated_at=?, "
+            "message_count=message_count+2, "
+            "question_count=? "
             "WHERE id=?",
             (
                 now,
@@ -140,19 +188,24 @@ def save_messages_batch(campaign_id, user_msg, assistant_msg, is_ques, now):
         )
 
         conn.commit()
+
         return new_count
 
-    except:
+    except Exception:
+
         conn.rollback()
+
         raise
 
     finally:
+
         conn.close()
 
 
-# ============================================================
-# 🔥 UPDATED ORCHESTRATOR
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# ORCHESTRATOR
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
 
 def get_orchestrator():
     """Get or create SmartMain orchestrator instance"""
@@ -160,7 +213,9 @@ def get_orchestrator():
     global _orchestrator
 
     if _orchestrator is None:
+
         from main import SmartMain
+
         _orchestrator = SmartMain()
 
     return _orchestrator
@@ -169,77 +224,84 @@ def get_orchestrator():
 def run_orchestrator_async():
     """Run orchestrator in background thread"""
 
-    global _orchestrator_running, _orchestrator_thread
+    global _orchestrator_running
+    global _orchestrator_thread
 
     if _orchestrator_running:
+
         return
 
     _orchestrator_running = True
+
     orchestrator = get_orchestrator()
 
     def run():
 
+        global _orchestrator_running
+
         try:
-            orchestrator.run("RapidWorker pe jao, task karo")
+
+            orchestrator.run(
+                "RapidWorker pe jao, task karo"
+            )
 
         except Exception as e:
-            print(f"❌ Orchestrator error: {e}")
+
+            print(
+                f"❌ Orchestrator error: {e}"
+            )
 
         finally:
 
-            global _orchestrator_running
             _orchestrator_running = False
 
-    _orchestrator_thread = threading.Thread(target=run)
-    _orchestrator_thread.daemon = True
+    _orchestrator_thread = threading.Thread(
+        target=run,
+        daemon=True
+    )
+
     _orchestrator_thread.start()
 
 
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # 🧪 EXTENSION TEST BRIDGE CONTROLLER
-# ============================================================
-# IMPORTANT:
-# Ye existing AI/database/task system se alag testing layer hai.
-# Iska kaam sirf:
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# Colab
-#   ↓
-# Render
-#   ↓
-# Kiwi Extension
-#   ↓
-# Browser
-#   ↓
-# Kiwi Extension
-#   ↓
-# Render
-#   ↓
-# Colab
+# Supported bridge actions:
 #
-# Is test layer ko production AI logic mein abhi mix nahi kiya gaya.
-# ============================================================
+#    open
+#    search
+#
+# ====================================================================================================
 
 
-# Private test token
-#
-# Render Environment Variable:
-#
-# EXTENSION_TEST_TOKEN
-#
-# Agar environment variable set nahi hai to random token generate hoga.
-# Production mein Environment Variable use karna zaroori hai.
+# ----------------------------------------------------------------------------------------------------
+# EXTENSION TEST TOKEN
+# ----------------------------------------------------------------------------------------------------
+
 EXTENSION_TEST_TOKEN = os.getenv(
     "EXTENSION_TEST_TOKEN"
 )
 
+# Development fallback.
+# Production mein Render Environment Variable use karo.
 if not EXTENSION_TEST_TOKEN:
-    EXTENSION_TEST_TOKEN = secrets.token_urlsafe(32)
+
+    EXTENSION_TEST_TOKEN = secrets.token_urlsafe(
+        32
+    )
 
 
-# Shared testing state
+# ----------------------------------------------------------------------------------------------------
+# SHARED EXTENSION STATE
+# ----------------------------------------------------------------------------------------------------
+
 _extension_test_state = {
+
     "registered": False,
+
     "extension_id": None,
+
     "registered_at": None,
 
     "pending_command": None,
@@ -247,7 +309,12 @@ _extension_test_state = {
     "last_result": None,
 
     "last_command_at": None,
-    "last_result_at": None
+
+    "last_result_at": None,
+
+    # Latest command ID.
+    # Isse result matching aur debugging better hoti hai.
+    "last_command_id": None
 }
 
 
@@ -255,9 +322,14 @@ _extension_test_state = {
 _extension_test_lock = threading.Lock()
 
 
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# EXTENSION AUTH
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
 def extension_test_authorized():
     """
-    Check whether request contains the correct test token.
+    Check whether request contains correct extension test token.
     """
 
     supplied_token = request.headers.get(
@@ -265,58 +337,210 @@ def extension_test_authorized():
     )
 
     if not supplied_token:
+
         return False
 
-    return secrets.compare_digest(
-        supplied_token,
-        EXTENSION_TEST_TOKEN
-    )
+    try:
+
+        return secrets.compare_digest(
+            str(supplied_token),
+            str(EXTENSION_TEST_TOKEN)
+        )
+
+    except Exception:
+
+        return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# EXTENSION STATE SNAPSHOT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def extension_test_state_snapshot():
     """
-    Return safe copy of test state.
-    Secret token kabhi response mein nahi bhejna.
+    Safe copy of bridge state.
+
+    Secret token kabhi response mein nahi bheja jayega.
     """
 
     with _extension_test_lock:
 
+        pending = (
+            _extension_test_state[
+                "pending_command"
+            ]
+            is not None
+        )
+
         return {
-            "registered": _extension_test_state["registered"],
-            "extension_id": _extension_test_state["extension_id"],
-            "registered_at": _extension_test_state["registered_at"],
 
-            "pending_command": (
-                _extension_test_state["pending_command"]
-                is not None
-            ),
+            "registered":
+                _extension_test_state[
+                    "registered"
+                ],
 
-            "last_command_at": _extension_test_state["last_command_at"],
+            "extension_id":
+                _extension_test_state[
+                    "extension_id"
+                ],
 
-            "last_result": _extension_test_state["last_result"],
+            "registered_at":
+                _extension_test_state[
+                    "registered_at"
+                ],
 
-            "last_result_at": _extension_test_state["last_result_at"]
+            "pending_command":
+                pending,
+
+            "last_command_at":
+                _extension_test_state[
+                    "last_command_at"
+                ],
+
+            "last_command_id":
+                _extension_test_state[
+                    "last_command_id"
+                ],
+
+            "last_result":
+                _extension_test_state[
+                    "last_result"
+                ],
+
+            "last_result_at":
+                _extension_test_state[
+                    "last_result_at"
+                ]
         }
 
 
-# ============================================================
-# 🔥 NEW ROUTE TEMPLATE
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE COMMAND HELPERS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-"""
-def new_controller(param1, param2):
-    '''
-    📌 CONTROLLER: [Name]
-    📝 PURPOSE: [What it does]
-    '''
-    return result
-"""
+
+def normalize_bridge_action(action):
+    """
+    Normalize bridge action.
+
+    Example:
+        SEARCH
+        search
+        Search
+
+    Sab:
+        search
+    """
+
+    if action is None:
+
+        return ""
+
+    return str(
+        action
+    ).strip().lower()
+
+
+def normalize_search_engine(engine):
+    """
+    Normalize supported search engine.
+    """
+
+    engine = str(
+        engine or "google"
+    ).strip().lower()
+
+    if engine in (
+        "duckduckgo",
+        "ddg"
+    ):
+
+        return "duckduckgo"
+
+    if engine == "bing":
+
+        return "bing"
+
+    return "google"
+
+
+def get_search_data(data):
+    """
+    Search request ke different possible formats support karta hai.
+
+    Supported:
+
+    {
+        "query": "OpenAI"
+    }
+
+    OR:
+
+    {
+        "data": {
+            "query": "OpenAI"
+        }
+    }
+
+    OR:
+
+    {
+        "extra_data": {
+            "query": "OpenAI"
+        }
+    }
+    """
+
+    query = (
+        data.get("query")
+        or
+        (
+            data.get(
+                "data"
+            ) or {}
+        ).get("query")
+        or
+        (
+            data.get(
+                "extra_data"
+            ) or {}
+        ).get("query")
+        or
+        ""
+    )
+
+    engine = (
+        data.get("engine")
+        or
+        (
+            data.get(
+                "data"
+            ) or {}
+        ).get("engine")
+        or
+        (
+            data.get(
+                "extra_data"
+            ) or {}
+        ).get("engine")
+        or
+        "google"
+    )
+
+    return (
+        str(query).strip(),
+        normalize_search_engine(engine)
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 # LAYER 4: ROUTES
-# 🔵 OLD ROUTES PRESERVED
-# 🔵 TEST BRIDGE ROUTES ADDED ONLY
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# HOME
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -325,16 +549,37 @@ def home():
     """Home - System status"""
 
     return jsonify({
+
         "status": "AI Ultimate Pro",
-        "version": "7.0",
+
+        "version": "7.1",
+
         "features": [
+
             "Chat",
+
             "Blogs",
+
             "History",
+
             "Batch Writes",
-            "Image Understanding"
+
+            "Image Understanding",
+
+            "Kiwi Extension Bridge",
+
+            "Browser Open",
+
+            "Browser Search"
+
         ]
+
     })
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# HEALTH
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 @app.route("/health")
@@ -344,29 +589,64 @@ def health():
     db_ok, db_msg = check_database()
 
     return jsonify({
-        "status": "healthy" if db_ok else "degraded",
-        "timestamp": datetime.now().isoformat(),
-        "database": db_msg,
-        "uptime_seconds": get_uptime()
+
+        "status":
+            "healthy"
+            if db_ok
+            else "degraded",
+
+        "timestamp":
+            datetime.now().isoformat(),
+
+        "database":
+            db_msg,
+
+        "uptime_seconds":
+            get_uptime()
+
     }), 200
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# PING
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 @app.route("/ping")
 def ping():
-    """Simple ping to check if server is alive"""
+    """Simple ping"""
 
     return "pong", 200
 
 
-@app.route("/keep-alive", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# KEEP ALIVE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/keep-alive",
+    methods=["GET"]
+)
 def keep_alive():
-    """Keep Render awake - No UptimeRobot needed"""
+    """Keep Render awake"""
 
     return jsonify({
+
         "status": "awake",
-        "timestamp": datetime.now().isoformat(),
-        "uptime_seconds": get_uptime()
+
+        "timestamp":
+            datetime.now().isoformat(),
+
+        "uptime_seconds":
+            get_uptime()
+
     }), 200
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# CAMPAIGNS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 @app.route("/campaigns")
@@ -374,59 +654,107 @@ def campaigns():
     """Get all campaigns/chats"""
 
     try:
+
         return jsonify({
-            "campaigns": get_campaigns()
+
+            "campaigns":
+                get_campaigns()
+
         })
 
     except Exception as e:
 
         return jsonify({
+
             "error": str(e)
+
         }), 500
 
 
-@app.route("/campaign/<campaign_id>")
-def get_campaign_details(campaign_id):
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# CAMPAIGN DETAILS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/campaign/<campaign_id>"
+)
+def get_campaign_details(
+    campaign_id
+):
     """Get specific chat history"""
 
     try:
 
-        all_history = get_all_history(campaign_id)
+        all_history = get_all_history(
+            campaign_id
+        )
 
         history = [
+
             {
                 "role": h["role"],
                 "content": h["content"]
             }
+
             for h in all_history
+
         ]
 
-        campaign = get_campaign(campaign_id)
+        campaign = get_campaign(
+            campaign_id
+        )
 
-        if campaign and campaign.get("is_deleted"):
+        if (
+            campaign
+            and
+            campaign.get("is_deleted")
+        ):
 
             return jsonify({
+
                 "error": "Chat deleted"
+
             }), 404
 
         return jsonify({
-            "conversation": history,
-            "title": campaign["title"] if campaign else "चैट",
-            "question_count": (
+
+            "conversation":
+                history,
+
+            "title":
+                campaign["title"]
+                if campaign
+                else "चैट",
+
+            "question_count":
                 campaign["question_count"]
-                if campaign else 0
-            ),
-            "message_count": len(history)
+                if campaign
+                else 0,
+
+            "message_count":
+                len(history)
+
         })
 
     except Exception as e:
 
         return jsonify({
+
             "error": str(e)
+
         }), 500
 
 
-@app.route("/command", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# NEW COMMAND
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/command",
+    methods=["POST"]
+)
 def command():
     """Create new chat with command"""
 
@@ -434,30 +762,51 @@ def command():
 
         data = request.json or {}
 
-        query = data.get("command")
+        query = data.get(
+            "command"
+        )
 
         if not query:
 
             return jsonify({
-                "error": "कोई कमांड नहीं"
+
+                "error":
+                    "कोई कमांड नहीं"
+
             }), 400
 
-        valid, msg = validate_message(query)
+        valid, msg = validate_message(
+            query
+        )
 
         if not valid:
 
             return jsonify({
-                "error": msg
+
+                "error":
+                    msg
+
             }), 400
 
-        query = sanitize_text(query)
+        query = sanitize_text(
+            query
+        )
 
-        campaign_id = str(uuid.uuid4())
+        campaign_id = str(
+            uuid.uuid4()
+        )
+
         now = datetime.now().isoformat()
 
-        is_ques = 1 if is_question(query) else 0
+        is_ques = (
+            1
+            if is_question(query)
+            else 0
+        )
 
-        intent = detect_intent(query)
+        intent = detect_intent(
+            query
+        )
 
         response = generate_response(
             intent,
@@ -485,19 +834,43 @@ def command():
         )
 
         return jsonify({
-            "campaign_id": campaign_id,
-            "response": format_response(response),
-            "intent": intent
+
+            "campaign_id":
+                campaign_id,
+
+            "response":
+                format_response(
+                    response
+                ),
+
+            "intent":
+                intent
+
         })
 
     except Exception as e:
 
+        print(
+            f"❌ /command error: {e}"
+        )
+
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/chat/<campaign_id>", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# CHAT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/chat/<campaign_id>",
+    methods=["POST"]
+)
 def chat(campaign_id):
     """Send message to existing chat"""
 
@@ -505,41 +878,67 @@ def chat(campaign_id):
 
         data = request.json or {}
 
-        message = data.get("message")
+        message = data.get(
+            "message"
+        )
 
         if not message:
 
             return jsonify({
-                "error": "खाली मैसेज"
+
+                "error":
+                    "खाली मैसेज"
+
             }), 400
 
-        valid, msg = validate_message(message)
+        valid, msg = validate_message(
+            message
+        )
 
         if not valid:
 
             return jsonify({
-                "error": msg
+
+                "error":
+                    msg
+
             }), 400
 
-        message = sanitize_text(message)
+        message = sanitize_text(
+            message
+        )
 
-        campaign = get_campaign(campaign_id)
+        campaign = get_campaign(
+            campaign_id
+        )
 
         if not campaign:
 
             return jsonify({
-                "error": "चैट नहीं मिली"
+
+                "error":
+                    "चैट नहीं मिली"
+
             }), 404
 
-        if campaign.get("is_deleted"):
+        if campaign.get(
+            "is_deleted"
+        ):
 
             return jsonify({
-                "error": "चैट डिलीट हो चुकी है"
+
+                "error":
+                    "चैट डिलीट हो चुकी है"
+
             }), 400
 
         now = datetime.now().isoformat()
 
-        is_ques = 1 if is_question(message) else 0
+        is_ques = (
+            1
+            if is_question(message)
+            else 0
+        )
 
         recent_history = get_recent_history(
             campaign_id,
@@ -551,10 +950,17 @@ def chat(campaign_id):
             recent_history
         )
 
-        # Handle rename command
-        if message.lower().startswith("rename "):
+        # ------------------------------------------------
+        # RENAME
+        # ------------------------------------------------
 
-            new_name = message[7:].strip()
+        if message.lower().startswith(
+            "rename "
+        ):
+
+            new_name = message[
+                7:
+            ].strip()
 
             if new_name:
 
@@ -564,15 +970,28 @@ def chat(campaign_id):
                 )
 
                 return jsonify({
-                    "response": (
-                        f"✅ चैट का नाम बदलकर "
-                        f"**{new_name}** कर दिया गया!"
-                    ),
-                    "intent": "rename"
+
+                    "response":
+                        (
+                            f"✅ चैट का नाम "
+                            f"बदलकर "
+                            f"**{new_name}** "
+                            f"कर दिया गया!"
+                        ),
+
+                    "intent":
+                        "rename"
+
                 })
 
-        # Handle delete command
-        elif message.lower().strip() == "delete":
+        # ------------------------------------------------
+        # DELETE
+        # ------------------------------------------------
+
+        elif (
+            message.lower().strip()
+            == "delete"
+        ):
 
             delete_campaign(
                 campaign_id,
@@ -580,12 +999,22 @@ def chat(campaign_id):
             )
 
             return jsonify({
-                "response": "🗑️ **चैट डिलीट हो गई!**",
-                "intent": "delete",
-                "deleted": True
+
+                "response":
+                    "🗑️ **चैट डिलीट हो गई!**",
+
+                "intent":
+                    "delete",
+
+                "deleted":
+                    True
+
             })
 
-        # Generate response
+        # ------------------------------------------------
+        # AI RESPONSE
+        # ------------------------------------------------
+
         response = generate_response(
             intent,
             message,
@@ -594,42 +1023,78 @@ def chat(campaign_id):
             campaign_id
         )
 
-        # Batch write
-        new_question_count = save_messages_batch(
-            campaign_id,
-            message,
-            response,
-            is_ques,
-            now
+        # ------------------------------------------------
+        # BATCH WRITE
+        # ------------------------------------------------
+
+        new_question_count = (
+            save_messages_batch(
+                campaign_id,
+                message,
+                response,
+                is_ques,
+                now
+            )
         )
 
         return jsonify({
-            "response": format_response(response),
-            "intent": intent,
-            "question_count": new_question_count
+
+            "response":
+                format_response(
+                    response
+                ),
+
+            "intent":
+                intent,
+
+            "question_count":
+                new_question_count
+
         })
 
     except Exception as e:
 
+        print(
+            f"❌ /chat error: {e}"
+        )
+
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/campaign/rename/<campaign_id>", methods=["POST"])
-def rename_campaign_route(campaign_id):
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# RENAME
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/campaign/rename/<campaign_id>",
+    methods=["POST"]
+)
+def rename_campaign_route(
+    campaign_id
+):
     """Rename a chat"""
 
     try:
 
         data = request.json or {}
 
-        new_name = data.get("name")
+        new_name = data.get(
+            "name"
+        )
 
         if not new_name:
 
             return jsonify({
-                "error": "नाम चाहिए"
+
+                "error":
+                    "नाम चाहिए"
+
             }), 400
 
         rename_campaign(
@@ -638,19 +1103,37 @@ def rename_campaign_route(campaign_id):
         )
 
         return jsonify({
-            "status": "renamed",
-            "new_name": new_name
+
+            "status":
+                "renamed",
+
+            "new_name":
+                new_name
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/campaign/delete/<campaign_id>", methods=["DELETE"])
-def delete_campaign_route(campaign_id):
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# DELETE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/campaign/delete/<campaign_id>",
+    methods=["DELETE"]
+)
+def delete_campaign_route(
+    campaign_id
+):
     """Delete a chat"""
 
     try:
@@ -661,58 +1144,100 @@ def delete_campaign_route(campaign_id):
         )
 
         return jsonify({
-            "status": "deleted"
+
+            "status":
+                "deleted"
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/campaign/restore/<campaign_id>", methods=["POST"])
-def restore_campaign_route(campaign_id):
-    """Restore a deleted chat"""
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# RESTORE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/campaign/restore/<campaign_id>",
+    methods=["POST"]
+)
+def restore_campaign_route(
+    campaign_id
+):
+    """Restore deleted chat"""
 
     try:
 
-        restore_campaign(campaign_id)
+        restore_campaign(
+            campaign_id
+        )
 
         return jsonify({
-            "status": "restored"
+
+            "status":
+                "restored"
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/blog/<slug>")
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BLOG
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/blog/<slug>"
+)
 def blog(slug):
     """View blog post"""
 
     try:
 
-        post = get_blog_by_slug(slug)
+        post = get_blog_by_slug(
+            slug
+        )
 
         if not post:
 
-            return "<h1>Blog not found</h1>", 404
+            return (
+                "<h1>Blog not found</h1>",
+                404
+            )
 
         title, content, created_at = post
 
         return f"""
         <!DOCTYPE html>
         <html>
+
         <head>
             <title>{title}</title>
             <meta charset="UTF-8">
         </head>
 
-        <body style="font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px;">
+        <body style="
+            font-family: sans-serif;
+            max-width: 800px;
+            margin: auto;
+            padding: 20px;
+        ">
 
             <h1>{title}</h1>
 
@@ -725,36 +1250,60 @@ def blog(slug):
             </div>
 
             <p>
-                <a href="/">🏠 Back to Home</a>
+                <a href="/">
+                    🏠 Back to Home
+                </a>
             </p>
 
         </body>
+
         </html>
         """
 
     except Exception as e:
 
-        return f"<h1>Error</h1><p>{str(e)}</p>", 500
+        return (
+            f"<h1>Error</h1><p>{str(e)}</p>",
+            500
+        )
 
 
-@app.route("/blog/publish", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# PUBLISH BLOG
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/blog/publish",
+    methods=["POST"]
+)
 def publish_blog():
-    """Publish a blog post"""
+    """Publish blog post"""
 
     try:
 
         data = request.json or {}
 
-        title = data.get("title")
-        content = data.get("content")
+        title = data.get(
+            "title"
+        )
+
+        content = data.get(
+            "content"
+        )
 
         if not title or not content:
 
             return jsonify({
-                "error": "Title and content required"
+
+                "error":
+                    "Title and content required"
+
             }), 400
 
-        blog_id = str(uuid.uuid4())
+        blog_id = str(
+            uuid.uuid4()
+        )
 
         slug = (
             create_slug(title)
@@ -773,16 +1322,31 @@ def publish_blog():
         )
 
         return jsonify({
-            "success": True,
-            "slug": slug,
-            "url": f"{BACKEND_URL}/blog/{slug}"
+
+            "success":
+                True,
+
+            "slug":
+                slug,
+
+            "url":
+                f"{BACKEND_URL}/blog/{slug}"
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BLOGS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 @app.route("/blogs")
@@ -791,27 +1355,39 @@ def blogs():
 
     try:
 
-        blogs = get_all_blogs(20)
+        all_blogs = get_all_blogs(
+            20
+        )
 
         return jsonify({
-            "blogs": blogs
+
+            "blogs":
+                all_blogs
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-# ============================================================
-# 📌 ROUTE: Chat with Image
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# CHAT WITH IMAGE
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-@app.route("/chat/image", methods=["POST"])
+
+@app.route(
+    "/chat/image",
+    methods=["POST"]
+)
 def chat_image():
     """
-    📌 ROUTE: Chat with Image
+    Chat with image
     """
 
     try:
@@ -823,30 +1399,49 @@ def chat_image():
             "Describe this image in detail."
         )
 
-        image_url = data.get("image_url")
+        image_url = data.get(
+            "image_url"
+        )
 
         if not image_url:
 
             return jsonify({
-                "error": "Image URL required"
+
+                "error":
+                    "Image URL required"
+
             }), 400
 
         content = [
+
             {
-                "type": "text",
-                "text": text
+                "type":
+                    "text",
+
+                "text":
+                    text
             },
+
             {
-                "type": "image_url",
-                "image_url": image_url
+                "type":
+                    "image_url",
+
+                "image_url":
+                    image_url
             }
+
         ]
 
         messages = [
+
             {
-                "role": "user",
-                "content": content
+                "role":
+                    "user",
+
+                "content":
+                    content
             }
+
         ]
 
         response = ai_chat(
@@ -856,25 +1451,37 @@ def chat_image():
         )
 
         return jsonify({
-            "success": True,
-            "response": response
+
+            "success":
+                True,
+
+            "response":
+                response
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+                str(e)
+
         }), 500
 
 
-# ============================================================
-# 🆕 UPDATED ROUTES - Smart Website Master Automation
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# SMART WEBSITE MASTER AUTOMATION
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-@app.route("/automation/start", methods=["POST"])
+
+@app.route(
+    "/automation/start",
+    methods=["POST"]
+)
 def automation_start():
     """
-    📌 ROUTE: Start Automation
+    Start Automation
     """
 
     try:
@@ -884,47 +1491,90 @@ def automation_start():
         if _orchestrator_running:
 
             return jsonify({
-                "success": False,
-                "message": "⚠️ Automation already running!",
-                "status": "running"
+
+                "success":
+                    False,
+
+                "message":
+                    "⚠️ Automation already running!",
+
+                "status":
+                    "running"
+
             }), 400
 
         orchestrator = get_orchestrator()
 
         def run_automation():
 
-            orchestrator.run(
-                "RapidWorker pe jao, task karo"
-            )
+            global _orchestrator_running
+
+            try:
+
+                orchestrator.run(
+                    "RapidWorker pe jao, task karo"
+                )
+
+            except Exception as e:
+
+                print(
+                    f"❌ Automation error: {e}"
+                )
+
+            finally:
+
+                _orchestrator_running = False
 
         thread = threading.Thread(
-            target=run_automation
+            target=run_automation,
+            daemon=True
         )
 
-        thread.daemon = True
         thread.start()
 
         _orchestrator_running = True
 
         return jsonify({
-            "success": True,
-            "message": "🚀 Smart Website Master started!",
-            "status": "starting",
-            "timestamp": datetime.now().isoformat()
+
+            "success":
+                True,
+
+            "message":
+                "🚀 Smart Website Master started!",
+
+            "status":
+                "starting",
+
+            "timestamp":
+                datetime.now().isoformat()
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/automation/stop", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# AUTOMATION STOP
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/automation/stop",
+    methods=["POST"]
+)
 def automation_stop():
     """
-    📌 ROUTE: Stop Automation
+    Stop Automation
     """
 
     try:
@@ -934,24 +1584,46 @@ def automation_stop():
         _orchestrator_running = False
 
         return jsonify({
-            "success": True,
-            "message": "🛑 Automation stopped!",
-            "status": "stopped",
-            "timestamp": datetime.now().isoformat()
+
+            "success":
+                True,
+
+            "message":
+                "🛑 Automation stopped!",
+
+            "status":
+                "stopped",
+
+            "timestamp":
+                datetime.now().isoformat()
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/automation/status", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# AUTOMATION STATUS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/automation/status",
+    methods=["GET"]
+)
 def automation_status():
     """
-    📌 ROUTE: Get Automation Status
+    Get Automation Status
     """
 
     try:
@@ -959,91 +1631,144 @@ def automation_status():
         orchestrator = get_orchestrator()
 
         status = (
+
             orchestrator.get_status()
-            if hasattr(orchestrator, "get_status")
-            else {"status": "idle"}
+
+            if hasattr(
+                orchestrator,
+                "get_status"
+            )
+
+            else {
+                "status":
+                    "idle"
+            }
+
         )
 
         return jsonify({
-            "success": True,
-            "status": status
+
+            "success":
+                True,
+
+            "status":
+                status
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/automation/command", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# AUTOMATION COMMAND
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/automation/command",
+    methods=["POST"]
+)
 def automation_command():
     """
-    📌 ROUTE: Send Automation Command
+    Send Automation Command
     """
 
     try:
 
         data = request.json or {}
 
-        command = data.get(
+        command_value = data.get(
             "command",
             ""
+        )
+
+        command_value = str(
+            command_value
         ).lower().strip()
 
-        if not command:
+        if not command_value:
 
             return jsonify({
-                "success": False,
-                "error": "Command required"
+
+                "success":
+                    False,
+
+                "error":
+                    "Command required"
+
             }), 400
 
-        if command == "start":
+        if command_value == "start":
 
             return automation_start()
 
-        elif command == "stop":
+        elif command_value == "stop":
 
             return automation_stop()
 
-        elif command == "status":
+        elif command_value == "status":
 
             return automation_status()
 
         else:
 
             return jsonify({
-                "success": False,
-                "error": (
-                    f"Unknown command: {command}. "
-                    f"Available: start, stop, status"
-                )
+
+                "success":
+                    False,
+
+                "error":
+                    (
+                        f"Unknown command: "
+                        f"{command_value}. "
+                        f"Available: "
+                        f"start, stop, status"
+                    )
+
             }), 400
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-# ============================================================
-# 🔥 EXTENSION CONNECTION ROUTES
-# ============================================================
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# TASK START
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
-@app.route("/task/start", methods=["POST"])
+
+@app.route(
+    "/task/start",
+    methods=["POST"]
+)
 def task_start():
     """
-    📌 ROUTE: Extension se task start command
+    Extension se task start command
     """
 
     try:
 
         data = request.json or {}
 
-        command = data.get(
+        command_value = data.get(
             "command",
             "task start"
         )
@@ -1052,33 +1777,71 @@ def task_start():
 
         def run_task():
 
-            orchestrator.run(command)
+            global _orchestrator_running
+
+            _orchestrator_running = True
+
+            try:
+
+                orchestrator.run(
+                    command_value
+                )
+
+            except Exception as e:
+
+                print(
+                    f"❌ Task error: {e}"
+                )
+
+            finally:
+
+                _orchestrator_running = False
 
         thread = threading.Thread(
-            target=run_task
+            target=run_task,
+            daemon=True
         )
 
-        thread.daemon = True
         thread.start()
 
         return jsonify({
-            "success": True,
-            "message": "✅ Task started!",
-            "status": "running"
+
+            "success":
+                True,
+
+            "message":
+                "✅ Task started!",
+
+            "status":
+                "running"
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/task/stop", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# TASK STOP
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/task/stop",
+    methods=["POST"]
+)
 def task_stop():
     """
-    📌 ROUTE: Extension se task stop command
+    Extension se task stop command
     """
 
     try:
@@ -1088,22 +1851,40 @@ def task_stop():
         _orchestrator_running = False
 
         return jsonify({
-            "success": True,
-            "message": "⏹ Task stopped!"
+
+            "success":
+                True,
+
+            "message":
+                "⏹ Task stopped!"
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/task/status", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# TASK STATUS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/task/status",
+    methods=["GET"]
+)
 def task_status():
     """
-    📌 ROUTE: Extension se status check
+    Extension se status check
     """
 
     try:
@@ -1111,296 +1892,660 @@ def task_status():
         orchestrator = get_orchestrator()
 
         status = (
+
             orchestrator.get_status()
-            if hasattr(orchestrator, "get_status")
-            else {"status": "idle"}
+
+            if hasattr(
+                orchestrator,
+                "get_status"
+            )
+
+            else {
+                "status":
+                    "idle"
+            }
+
         )
 
         return jsonify({
-            "success": True,
-            "status": status.get(
-                "status",
-                "idle"
-            ),
-            "tasks_completed": status.get(
-                "tasks_completed",
-                0
-            ),
-            "total_earned": status.get(
-                "total_earned",
-                0
-            )
+
+            "success":
+                True,
+
+            "status":
+                status.get(
+                    "status",
+                    "idle"
+                ),
+
+            "tasks_completed":
+                status.get(
+                    "tasks_completed",
+                    0
+                ),
+
+            "total_earned":
+                status.get(
+                    "total_earned",
+                    0
+                )
+
         })
 
     except Exception as e:
 
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# 🧪 LAYER 4: EXTENSION TEST BRIDGE ROUTES
+# 🧪 EXTENSION TEST BRIDGE
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# IMPORTANT:
-# Ye routes existing routes ko replace nahi karte.
-# Ye sirf temporary/prototype connection testing ke liye hain.
+# Supported:
 #
-# Flow:
+#    GET  /extension/test/ping
+#    POST /extension/test/register
+#    POST /extension/test/command
+#    GET  /extension/test/next
+#    POST /extension/test/result
+#    GET  /extension/test/status
 #
-# Colab
-#   ↓
-# /extension/test/command
-#   ↓
-# Render
-#   ↓
-# /extension/test/next
-#   ↓
-# Kiwi Extension
-#   ↓
-# Browser
-#   ↓
-# /extension/test/result
-#   ↓
-# Render
-#   ↓
-# Colab
+# Actions:
+#
+#    open
+#    search
 #
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-@app.route("/extension/test/ping", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE PING
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/ping",
+    methods=["GET"]
+)
 def extension_test_ping():
     """
-    🧪 TEST ROUTE 1
+    Test Bridge Ping
 
-    Purpose:
-        Sirf ye check karta hai ki
-        Render test bridge route reachable hai.
-
-    Authentication:
-        Not required.
-
-    Expected:
-        HTTP 200
-        success = true
+    Authentication required nahi hai.
     """
 
     return jsonify({
-        "success": True,
-        "service": "extension_test_bridge",
-        "status": "online",
-        "message": "Extension test bridge is reachable",
-        "timestamp": datetime.now().isoformat()
+
+        "success":
+            True,
+
+        "service":
+            "extension_test_bridge",
+
+        "status":
+            "online",
+
+        "version":
+            "7.1",
+
+        "supported_actions": [
+
+            "open",
+
+            "search"
+
+        ],
+
+        "message":
+            "Extension test bridge is reachable",
+
+        "timestamp":
+            datetime.now().isoformat()
+
     }), 200
 
 
-@app.route("/extension/test/register", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE REGISTER
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/register",
+    methods=["POST"]
+)
 def extension_test_register():
     """
-    🧪 TEST ROUTE 2
-
-    Kiwi Extension apne aap ko testing bridge
-    par register karegi.
+    Kiwi Extension apne aap ko Render bridge par register karegi.
     """
 
     if not extension_test_authorized():
 
         return jsonify({
-            "success": False,
-            "error": "Unauthorized test token"
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
         }), 401
 
     try:
 
-        data = request.json or {}
+        data = request.get_json(
+            silent=True
+        ) or {}
 
         extension_id = data.get(
             "extension_id",
             "kiwi-test-extension"
         )
 
+        extension_id = str(
+            extension_id
+        ).strip()
+
+        if not extension_id:
+
+            extension_id = (
+                "kiwi-test-extension"
+            )
+
         with _extension_test_lock:
 
-            _extension_test_state["registered"] = True
+            _extension_test_state[
+                "registered"
+            ] = True
 
-            _extension_test_state["extension_id"] = (
-                extension_id
-            )
+            _extension_test_state[
+                "extension_id"
+            ] = extension_id
 
-            _extension_test_state["registered_at"] = (
-                datetime.now().isoformat()
-            )
+            _extension_test_state[
+                "registered_at"
+            ] = datetime.now().isoformat()
 
         return jsonify({
-            "success": True,
-            "registered": True,
-            "extension_id": extension_id,
-            "message": "Kiwi extension registered successfully",
-            "timestamp": datetime.now().isoformat()
+
+            "success":
+                True,
+
+            "registered":
+                True,
+
+            "extension_id":
+                extension_id,
+
+            "message":
+                "Kiwi extension registered successfully",
+
+            "timestamp":
+                datetime.now().isoformat()
+
         }), 200
 
     except Exception as e:
 
+        print(
+            f"❌ Extension register error: {e}"
+        )
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/extension/test/command", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE COMMAND
+# 🔥 MAIN FIX
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/command",
+    methods=["POST"]
+)
 def extension_test_command():
     """
-    🧪 TEST ROUTE 3
+    Queue command for Kiwi Extension.
 
-    Colab yahan command queue karega.
+    Supported:
 
-    Example:
+        OPEN:
 
         {
             "action": "open",
             "url": "https://www.google.com"
         }
 
-    Server command ko pending queue mein rakhega.
+
+        SEARCH:
+
+        {
+            "action": "search",
+            "query": "OpenAI",
+            "engine": "google"
+        }
+
+
+    Search ke liye ye formats bhi accepted hain:
+
+        {
+            "action": "search",
+            "data": {
+                "query": "OpenAI",
+                "engine": "google"
+            }
+        }
+
+
+        {
+            "action": "search",
+            "extra_data": {
+                "query": "OpenAI",
+                "engine": "google"
+            }
+        }
     """
+
+    # --------------------------------------------------------
+    # AUTH
+    # --------------------------------------------------------
 
     if not extension_test_authorized():
 
         return jsonify({
-            "success": False,
-            "error": "Unauthorized test token"
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
         }), 401
 
     try:
 
-        data = request.json or {}
+        data = request.get_json(
+            silent=True
+        ) or {}
 
-        action = data.get("action")
+        # ----------------------------------------------------
+        # ACTION
+        # ----------------------------------------------------
+
+        action = normalize_bridge_action(
+            data.get("action")
+        )
 
         if not action:
 
             return jsonify({
-                "success": False,
-                "error": "action is required"
+
+                "success":
+                    False,
+
+                "error":
+                    "action is required",
+
+                "supported_actions": [
+
+                    "open",
+
+                    "search"
+
+                ]
+
             }), 400
 
-        # First test ke liye open action
+        # ══════════════════════════════════════════════════
+        # OPEN
+        # ══════════════════════════════════════════════════
+
         if action == "open":
 
-            url = data.get("url")
+            url = data.get(
+                "url"
+            )
+
+            url = str(
+                url or ""
+            ).strip()
 
             if not url:
 
                 return jsonify({
-                    "success": False,
-                    "error": "url is required for open action"
+
+                    "success":
+                        False,
+
+                    "error":
+                        "url is required for open action"
+
+                }), 400
+
+            # ------------------------------------------------
+            # URL SAFETY
+            # ------------------------------------------------
+
+            if not (
+                url.startswith(
+                    "http://"
+                )
+                or
+                url.startswith(
+                    "https://"
+                )
+            ):
+
+                return jsonify({
+
+                    "success":
+                        False,
+
+                    "error":
+                        (
+                            "Only HTTP/HTTPS "
+                            "URLs are supported"
+                        )
+
                 }), 400
 
             command = {
-                "command_id": str(uuid.uuid4()),
-                "action": "open",
-                "url": url,
-                "created_at": datetime.now().isoformat()
+
+                "command_id":
+                    str(
+                        uuid.uuid4()
+                    ),
+
+                "action":
+                    "open",
+
+                "url":
+                    url,
+
+                "created_at":
+                    datetime.now().isoformat()
+
             }
+
+        # ══════════════════════════════════════════════════
+        # SEARCH
+        # 🔥 NEW
+        # ══════════════════════════════════════════════════
+
+        elif action == "search":
+
+            query, engine = get_search_data(
+                data
+            )
+
+            if not query:
+
+                return jsonify({
+
+                    "success":
+                        False,
+
+                    "error":
+                        (
+                            "query is required "
+                            "for search action"
+                        )
+
+                }), 400
+
+            command = {
+
+                "command_id":
+                    str(
+                        uuid.uuid4()
+                    ),
+
+                "action":
+                    "search",
+
+                "query":
+                    query,
+
+                "engine":
+                    engine,
+
+                "created_at":
+                    datetime.now().isoformat()
+
+            }
+
+        # ══════════════════════════════════════════════════
+        # UNSUPPORTED
+        # ══════════════════════════════════════════════════
 
         else:
 
             return jsonify({
-                "success": False,
-                "error": (
-                    "For Layer 1 test only "
-                    "'open' action is supported"
-                )
+
+                "success":
+                    False,
+
+                "error":
+                    (
+                        f"Unsupported bridge action: "
+                        f"{action}"
+                    ),
+
+                "supported_actions": [
+
+                    "open",
+
+                    "search"
+
+                ]
+
             }), 400
+
+        # ══════════════════════════════════════════════════
+        # QUEUE
+        # ══════════════════════════════════════════════════
 
         with _extension_test_lock:
 
-            _extension_test_state["pending_command"] = command
+            # Ek time par ek hi pending command.
+            #
+            # Agar extension abhi previous command consume
+            # nahi kar paayi hai to new command ko overwrite
+            # nahi karenge.
+            if (
+                _extension_test_state[
+                    "pending_command"
+                ]
+                is not None
+            ):
 
-            _extension_test_state["last_command_at"] = (
-                datetime.now().isoformat()
-            )
+                return jsonify({
 
-            # New command ke saath previous result clear
-            _extension_test_state["last_result"] = None
+                    "success":
+                        False,
 
-            _extension_test_state["last_result_at"] = None
+                    "queued":
+                        False,
+
+                    "error":
+                        (
+                            "Another extension "
+                            "command is already pending"
+                        ),
+
+                    "pending_command":
+                        True
+
+                }), 409
+
+            _extension_test_state[
+                "pending_command"
+            ] = command
+
+            _extension_test_state[
+                "last_command_at"
+            ] = datetime.now().isoformat()
+
+            _extension_test_state[
+                "last_command_id"
+            ] = command[
+                "command_id"
+            ]
+
+            # Previous result clear.
+            _extension_test_state[
+                "last_result"
+            ] = None
+
+            _extension_test_state[
+                "last_result_at"
+            ] = None
+
+        # ══════════════════════════════════════════════════
+        # RESPONSE
+        # ══════════════════════════════════════════════════
 
         return jsonify({
-            "success": True,
-            "queued": True,
-            "command": command,
-            "message": "Command queued for Kiwi extension"
+
+            "success":
+                True,
+
+            "queued":
+                True,
+
+            "command":
+                command,
+
+            "message":
+                (
+                    "Command queued successfully "
+                    "for Kiwi extension"
+                )
+
         }), 200
 
     except Exception as e:
 
+        print(
+            f"❌ Extension command error: {e}"
+        )
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/extension/test/next", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE NEXT
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/next",
+    methods=["GET"]
+)
 def extension_test_next():
     """
-    🧪 TEST ROUTE 4
-
     Kiwi Extension is route ko poll karegi.
 
-    Agar command available hai:
-        command return hogi.
+    Command milne ke baad queue se remove kar di jayegi.
 
-    Agar command nahi hai:
-        command = null
+    Isse same command repeat nahi hogi.
     """
 
     if not extension_test_authorized():
 
         return jsonify({
-            "success": False,
-            "error": "Unauthorized test token"
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
         }), 401
 
     try:
 
         with _extension_test_lock:
 
-            command = _extension_test_state[
-                "pending_command"
-            ]
+            command = (
+                _extension_test_state[
+                    "pending_command"
+                ]
+            )
 
-            # Command milne ke baad queue se remove.
-            # Isse same command baar-baar execute nahi hogi.
+            # Queue consume.
             _extension_test_state[
                 "pending_command"
             ] = None
 
         return jsonify({
-            "success": True,
-            "command": command
+
+            "success":
+                True,
+
+            "command":
+                command
+
         }), 200
 
     except Exception as e:
 
+        print(
+            f"❌ Extension next error: {e}"
+        )
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/extension/test/result", methods=["POST"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE RESULT
+# 🔥 SEARCH RESULT FIELDS ADDED
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/result",
+    methods=["POST"]
+)
 def extension_test_result():
     """
-    🧪 TEST ROUTE 5
-
-    Kiwi Extension browser action complete hone ke baad
+    Kiwi Extension action complete hone ke baad
     result yahan bhejegi.
 
-    Example:
+    OPEN result:
 
         {
             "command_id": "...",
@@ -1408,47 +2553,183 @@ def extension_test_result():
             "action": "open",
             "url": "https://www.google.com"
         }
+
+
+    SEARCH result:
+
+        {
+            "command_id": "...",
+            "success": true,
+            "action": "search",
+            "query": "OpenAI",
+            "engine": "google",
+            "url": "...",
+            "message": "..."
+        }
     """
 
     if not extension_test_authorized():
 
         return jsonify({
-            "success": False,
-            "error": "Unauthorized test token"
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
         }), 401
 
     try:
 
-        data = request.json or {}
+        data = request.get_json(
+            silent=True
+        ) or {}
 
         if not data:
 
             return jsonify({
-                "success": False,
-                "error": "Result data required"
+
+                "success":
+                    False,
+
+                "error":
+                    "Result data required"
+
             }), 400
 
+        command_id = data.get(
+            "command_id"
+        )
+
+        action = normalize_bridge_action(
+            data.get("action")
+        )
+
+        # ----------------------------------------------------
+        # RESULT OBJECT
+        # ----------------------------------------------------
+
         result = {
-            "command_id": data.get("command_id"),
-            "success": bool(
-                data.get("success", False)
-            ),
-            "action": data.get("action"),
-            "url": data.get("url"),
-            "message": data.get("message"),
-            "received_at": datetime.now().isoformat()
+
+            "command_id":
+                command_id,
+
+            "success":
+                bool(
+                    data.get(
+                        "success",
+                        False
+                    )
+                ),
+
+            "action":
+                action,
+
+            "url":
+                data.get(
+                    "url"
+                ),
+
+            # Search fields
+            "query":
+                data.get(
+                    "query"
+                ),
+
+            "engine":
+                data.get(
+                    "engine"
+                ),
+
+            # Browser tab
+            "tab_id":
+                data.get(
+                    "tab_id"
+                ),
+
+            # Human-readable message
+            "message":
+                data.get(
+                    "message"
+                ),
+
+            "received_at":
+                datetime.now().isoformat()
+
         }
 
-        # Optional extra result fields
+        # ----------------------------------------------------
+        # OPTIONAL FIELDS
+        # ----------------------------------------------------
+
         if "error" in data:
 
-            result["error"] = data.get("error")
+            result["error"] = data.get(
+                "error"
+            )
 
         if "title" in data:
 
-            result["title"] = data.get("title")
+            result["title"] = data.get(
+                "title"
+            )
+
+        if "text" in data:
+
+            result["text"] = data.get(
+                "text"
+            )
+
+        if "data" in data:
+
+            result["data"] = data.get(
+                "data"
+            )
+
+        # ----------------------------------------------------
+        # COMMAND ID VALIDATION
+        # ----------------------------------------------------
 
         with _extension_test_lock:
+
+            expected_command_id = (
+                _extension_test_state[
+                    "last_command_id"
+                ]
+            )
+
+            # Agar command ID available hai aur incoming
+            # result kisi old command ka hai, usse reject
+            # nahi karenge completely, lekin warning log karenge.
+            #
+            # Isse debugging easy rahegi.
+            if (
+                expected_command_id
+                and
+                command_id
+                and
+                command_id != expected_command_id
+            ):
+
+                print(
+                    "⚠️ Extension result command_id "
+                    "does not match latest command:"
+                )
+
+                print(
+                    "Expected:",
+                    expected_command_id
+                )
+
+                print(
+                    "Received:",
+                    command_id
+                )
+
+            # ------------------------------------------------
+            # SAVE RESULT
+            # ------------------------------------------------
 
             _extension_test_state[
                 "last_result"
@@ -1459,96 +2740,108 @@ def extension_test_result():
             ] = datetime.now().isoformat()
 
         return jsonify({
-            "success": True,
-            "message": "Result received by Render",
-            "result": result
+
+            "success":
+                True,
+
+            "message":
+                "Result received by Render",
+
+            "result":
+                result
+
         }), 200
 
     except Exception as e:
 
+        print(
+            f"❌ Extension result error: {e}"
+        )
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-@app.route("/extension/test/status", methods=["GET"])
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+# BRIDGE STATUS
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+@app.route(
+    "/extension/test/status",
+    methods=["GET"]
+)
 def extension_test_status():
     """
-    🧪 TEST ROUTE 6
+    Complete extension bridge status.
 
-    Colab is route ko use karke
-    complete testing status dekhega.
-
-    Secret token kabhi response mein nahi aayega.
+    Secret token response mein nahi aayega.
     """
 
     if not extension_test_authorized():
 
         return jsonify({
-            "success": False,
-            "error": "Unauthorized test token"
+
+            "success":
+                False,
+
+            "error":
+                "Unauthorized test token"
+
         }), 401
 
     try:
 
-        state = extension_test_state_snapshot()
+        state = (
+            extension_test_state_snapshot()
+        )
 
         return jsonify({
-            "success": True,
-            "service": "extension_test_bridge",
+
+            "success":
+                True,
+
+            "service":
+                "extension_test_bridge",
+
             **state,
-            "timestamp": datetime.now().isoformat()
+
+            "timestamp":
+                datetime.now().isoformat()
+
         }), 200
 
     except Exception as e:
 
+        print(
+            f"❌ Extension status error: {e}"
+        )
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
-# ============================================================
-# 🔥 NEW ROUTE TEMPLATE
-# ============================================================
-
-"""
-@app.route("/new-route", methods=["POST"])
-def new_route():
-    '''
-    📌 ROUTE: [Route Name]
-    📝 PURPOSE: [What this does]
-
-    Request Body:
-        { "param": "value" }
-
-    Returns:
-        { "success": True, "data": {} }
-    '''
-
-    try:
-
-        data = request.json or {}
-
-        return jsonify({
-            "success": True,
-            "data": data
-        })
-
-    except Exception as e:
-
-        return jsonify({
-            "error": str(e)
-        }), 500
-"""
-
-
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
-# LAYER 5: RUN (🔒 NEVER CHANGE!)
+# LAYER 5: RUN (🔒 PRESERVED)
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
 
 if __name__ == "__main__":
+
     app.run(
         host="0.0.0.0",
         port=10000,
@@ -1557,13 +2850,60 @@ if __name__ == "__main__":
 
 
 # ====================================================================================================
-# 📋 QUICK REFERENCE CARD - app.py
+# 📋 QUICK REFERENCE
 # ====================================================================================================
 #
-# 🔵 EXISTING ROUTES:
-#    Sab preserve kiye gaye hain.
+# BASIC:
 #
-# 🧪 NEW TEST BRIDGE:
+#    GET  /
+#    GET  /health
+#    GET  /ping
+#    GET  /keep-alive
+#
+#
+# CHAT:
+#
+#    GET  /campaigns
+#    GET  /campaign/<campaign_id>
+#    POST /command
+#    POST /chat/<campaign_id>
+#
+#
+# CAMPAIGN:
+#
+#    POST   /campaign/rename/<campaign_id>
+#    DELETE /campaign/delete/<campaign_id>
+#    POST   /campaign/restore/<campaign_id>
+#
+#
+# BLOG:
+#
+#    GET  /blog/<slug>
+#    POST /blog/publish
+#    GET  /blogs
+#
+#
+# IMAGE:
+#
+#    POST /chat/image
+#
+#
+# AUTOMATION:
+#
+#    POST /automation/start
+#    POST /automation/stop
+#    GET  /automation/status
+#    POST /automation/command
+#
+#
+# TASK:
+#
+#    POST /task/start
+#    POST /task/stop
+#    GET  /task/status
+#
+#
+# KIWI EXTENSION BRIDGE:
 #
 #    GET  /extension/test/ping
 #    POST /extension/test/register
@@ -1572,6 +2912,32 @@ if __name__ == "__main__":
 #    POST /extension/test/result
 #    GET  /extension/test/status
 #
-# 🔒 Existing AI / Database / Automation flow ko change nahi kiya gaya.
+#
+# BRIDGE ACTIONS:
+#
+#    open
+#    search
+#
+#
+# SEARCH REQUEST:
+#
+#    {
+#        "action": "search",
+#        "query": "OpenAI",
+#        "engine": "google"
+#    }
+#
+#
+# SEARCH RESULT:
+#
+#    {
+#        "command_id": "...",
+#        "success": true,
+#        "action": "search",
+#        "query": "OpenAI",
+#        "engine": "google",
+#        "url": "...",
+#        "message": "..."
+#    }
 #
 # ====================================================================================================
