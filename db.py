@@ -1,85 +1,120 @@
-# ====================================================================
-# 📁 FILE: db.py
-# 🎯 ROLE: MEMORY / DATABASE LAYER
-# 🚀 VERSION: Advanced Automation Memory + Checkpoint + Resume
-#
-# IMPORTANT:
-# - Existing Campaign / Message / Blog system preserved
-# - Existing ai_system.db filename preserved
-# - Automation task memory added
-# - Pause / Resume / Checkpoint support added
-# - Step history + result history added
-# - Retry/session state added
-# - Thread-safe SQLite access added
-# - Existing data is NOT intentionally deleted
-# ====================================================================
+"""
+===============================================================
+ FILE: db.py
+ ROLE: CANONICAL DATABASE / MEMORY / AUTOMATION STATE LAYER
+ VERSION: 10.0 ULTRA
+===============================================================
 
-import sqlite3
-from datetime import datetime, timezone
-import uuid
+PURPOSE
+-------
+This file is the SINGLE OWNER of the SQLite database structure.
+
+It provides:
+    - Campaign memory
+    - Chat/message memory
+    - Blog storage
+    - Automation tasks
+    - Automation sessions
+    - Automation steps
+    - Checkpoints / resume
+    - Automation events
+    - Browser/extension sessions
+    - Bridge commands
+    - Bridge results
+    - Extension registration / heartbeat
+    - Retry state
+    - Safe database migration
+    - Database health
+    - Database backup
+    - Thread-safe SQLite access
+
+IMPORTANT
+---------
+1. Existing ai_system.db is NOT deleted.
+2. Existing data is preserved wherever possible.
+3. Missing tables are created automatically.
+4. Missing compatible columns are migrated automatically.
+5. app.py must NOT create duplicate automation tables.
+6. This file is the canonical database schema owner.
+
+===============================================================
+"""
+
+from __future__ import annotations
+
 import os
 import json
-import threading
-import shutil
+import uuid
 import time
+import shutil
+import sqlite3
+import threading
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 
-# ====================================================================
-# DATABASE CONFIGURATION
-# ====================================================================
+# ===============================================================
+# 1. CONFIGURATION
+# ===============================================================
 
 DB_PATH = os.environ.get("AI_DB_PATH", "ai_system.db")
 
-# Optional backup directory.
-# Example:
-# DB_BACKUP_DIR=database_backups
-DB_BACKUP_DIR = os.environ.get("DB_BACKUP_DIR", "database_backups")
+DB_BACKUP_DIR = os.environ.get(
+    "DB_BACKUP_DIR",
+    "database_backups"
+)
 
-conn = None
-cursor = None
+DB_TIMEOUT = int(
+    os.environ.get("DB_TIMEOUT", "30")
+)
 
-# SQLite can be accessed by Flask request threads + automation threads.
-# One lock prevents simultaneous writes from corrupting transactions.
+DB_BUSY_TIMEOUT = int(
+    os.environ.get("DB_BUSY_TIMEOUT", "30000")
+)
+
+DB_VERSION = 10
+
+
+# ===============================================================
+# 2. GLOBAL LOCK
+# ===============================================================
+
 _db_lock = threading.RLock()
 
 
-# ====================================================================
-# GENERAL HELPERS
-# ====================================================================
+# ===============================================================
+# 3. BASIC HELPERS
+# ===============================================================
 
-def _utc_now():
-    """Return a clean UTC ISO timestamp."""
+def _utc_now() -> str:
+    """
+    Return timezone-aware UTC timestamp.
+    """
     return datetime.now(timezone.utc).isoformat()
 
 
-def _new_id(prefix=""):
-    """Create a unique ID."""
+def _new_id(prefix: str = "") -> str:
     value = str(uuid.uuid4())
     return f"{prefix}{value}" if prefix else value
 
 
-def _json_dumps(value):
-    """Safely convert Python data to JSON text."""
+def _json_dumps(value: Any) -> str:
     try:
         return json.dumps(
             value,
             ensure_ascii=False,
-            separators=(",", ":")
+            default=str
         )
     except Exception:
-        return json.dumps(
-            {"value": str(value)},
-            ensure_ascii=False
-        )
+        return "{}"
 
 
-def _json_loads(value, default=None):
-    """Safely convert JSON text back to Python data."""
-    if default is None:
-        default = {}
-
-    if value is None or value == "":
+def _json_loads(value: Any, default=None):
+    if value is None:
         return default
+
+    if isinstance(value, (dict, list)):
+        return value
 
     try:
         return json.loads(value)
@@ -87,127 +122,327 @@ def _json_loads(value, default=None):
         return default
 
 
-def _log_db_error(function_name, error):
-    """
-    Keep database errors visible during development.
-    Existing public functions still return safe fallback values.
-    """
-    print(f"❌ DB ERROR [{function_name}]: {error}")
+def _log_db_error(where: str, error: Exception):
+    print(
+        f"❌ DATABASE ERROR [{where}]: "
+        f"{type(error).__name__}: {error}"
+    )
 
 
-# ====================================================================
-# DATABASE CONNECTION
-# ====================================================================
+# ===============================================================
+# 4. CONNECTION FACTORY
+# ===============================================================
+
+def get_connection() -> sqlite3.Connection:
+    """
+    Create a fresh SQLite connection.
+
+    We intentionally do not depend on one global connection/cursor.
+    This is safer for Flask + extension polling + background tasks.
+    """
+
+    connection = sqlite3.connect(
+        DB_PATH,
+        timeout=DB_TIMEOUT,
+        check_same_thread=False
+    )
+
+    connection.row_factory = sqlite3.Row
+
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
+
+    try:
+        connection.execute(
+            f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT}"
+        )
+    except Exception:
+        pass
+
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        pass
+
+    try:
+        connection.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass
+
+    return connection
+
+
+# ===============================================================
+# 5. LEGACY COMPATIBILITY
+# ===============================================================
+
+# Kept for compatibility with older app.py / modules.
+
+conn = None
+cursor = None
+
+
+def get_cursor():
+    """
+    Compatibility helper.
+
+    Returns a fresh cursor instead of relying on a permanently
+    open global database connection.
+    """
+    connection = get_connection()
+    return connection.cursor()
+
+
+def commit():
+    """
+    Legacy compatibility function.
+
+    New code should commit on its own connection.
+    """
+    global conn
+
+    if conn is not None:
+        try:
+            conn.commit()
+        except Exception as e:
+            _log_db_error("commit", e)
+
+
+# ===============================================================
+# 6. SCHEMA HELPERS
+# ===============================================================
+
+def _table_exists(connection, table_name: str) -> bool:
+    row = connection.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type='table'
+          AND name=?
+        """,
+        (table_name,)
+    ).fetchone()
+
+    return row is not None
+
+
+def _get_columns(connection, table_name: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Return:
+        {
+            column_name: {
+                cid,
+                type,
+                notnull,
+                default,
+                pk
+            }
+        }
+    """
+
+    if not _table_exists(connection, table_name):
+        return {}
+
+    rows = connection.execute(
+        f'PRAGMA table_info("{table_name}")'
+    ).fetchall()
+
+    result = {}
+
+    for row in rows:
+        result[row["name"]] = dict(row)
+
+    return result
+
+
+def _add_column_if_missing(
+    connection,
+    table_name: str,
+    column_name: str,
+    column_definition: str
+):
+    columns = _get_columns(
+        connection,
+        table_name
+    )
+
+    if column_name in columns:
+        return False
+
+    connection.execute(
+        f'''
+        ALTER TABLE "{table_name}"
+        ADD COLUMN "{column_name}" {column_definition}
+        '''
+    )
+
+    return True
+
+
+# ===============================================================
+# 7. SAFE DATABASE BACKUP
+# ===============================================================
+
+def backup_database(
+    reason: str = "manual"
+) -> Optional[str]:
+
+    with _db_lock:
+
+        if not os.path.exists(DB_PATH):
+            return None
+
+        try:
+
+            os.makedirs(
+                DB_BACKUP_DIR,
+                exist_ok=True
+            )
+
+            timestamp = datetime.now(
+                timezone.utc
+            ).strftime("%Y%m%d_%H%M%S")
+
+            backup_name = (
+                f"ai_system_{timestamp}_{reason}.db"
+            )
+
+            backup_path = os.path.join(
+                DB_BACKUP_DIR,
+                backup_name
+            )
+
+            shutil.copy2(
+                DB_PATH,
+                backup_path
+            )
+
+            print(
+                f"✅ Database backup created: "
+                f"{backup_path}"
+            )
+
+            return backup_path
+
+        except Exception as e:
+
+            _log_db_error(
+                "backup_database",
+                e
+            )
+
+            return None
+
+
+# ===============================================================
+# 8. DATABASE INITIALIZATION
+# ===============================================================
 
 def init_db():
     """
-    Initialize the database and safely create/migrate tables.
+    Main database initializer.
 
-    Existing tables are preserved.
-    New automation tables are added automatically.
+    IMPORTANT:
+    Existing DB is never deleted.
     """
 
     global conn, cursor
 
     with _db_lock:
-        print("\n🚀 DATABASE INITIALIZATION")
-        print(f"📁 Database: {DB_PATH}")
 
         try:
-            conn = sqlite3.connect(
-                DB_PATH,
-                check_same_thread=False,
-                timeout=30
+
+            # ---------------------------------------------------
+            # Backup before schema work when DB already exists.
+            # ---------------------------------------------------
+
+            database_exists = os.path.exists(
+                DB_PATH
             )
 
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            connection = get_connection()
 
-            # --------------------------------------------------------
-            # SQLite reliability settings
-            # --------------------------------------------------------
+            # ---------------------------------------------------
+            # Schema version table
+            # ---------------------------------------------------
 
-            cursor.execute("PRAGMA foreign_keys = ON")
-            cursor.execute("PRAGMA journal_mode = WAL")
-            cursor.execute("PRAGMA synchronous = NORMAL")
-            cursor.execute("PRAGMA busy_timeout = 30000")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
-            # --------------------------------------------------------
-            # Existing Campaigns table
-            # --------------------------------------------------------
+            # ---------------------------------------------------
+            # CAMPAIGNS
+            # ---------------------------------------------------
 
-            cursor.execute("""
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS campaigns (
                     id TEXT PRIMARY KEY,
-                    title TEXT,
-                    created_at TEXT,
-                    updated_at TEXT,
+                    name TEXT NOT NULL,
+                    description TEXT DEFAULT '',
                     message_count INTEGER DEFAULT 0,
                     question_count INTEGER DEFAULT 0,
-                    is_deleted INTEGER DEFAULT 0,
-                    last_topic TEXT
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    is_deleted INTEGER DEFAULT 0
                 )
-            """)
+                """
+            )
 
-            # --------------------------------------------------------
-            # Existing Messages table
-            # --------------------------------------------------------
+            # ---------------------------------------------------
+            # MESSAGES
+            # ---------------------------------------------------
 
-            cursor.execute("""
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS messages (
                     id TEXT PRIMARY KEY,
                     campaign_id TEXT,
-                    role TEXT,
-                    content TEXT,
-                    is_question INTEGER DEFAULT 0,
-                    timestamp TEXT
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(campaign_id)
+                        REFERENCES campaigns(id)
                 )
-            """)
+                """
+            )
 
-            # --------------------------------------------------------
-            # Existing Posts table
-            # --------------------------------------------------------
+            # ---------------------------------------------------
+            # BLOG POSTS
+            # ---------------------------------------------------
 
-            cursor.execute("""
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS posts (
                     id TEXT PRIMARY KEY,
+                    slug TEXT UNIQUE,
                     title TEXT,
                     content TEXT,
-                    slug TEXT,
-                    created_at TEXT
+                    status TEXT DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
-            """)
+                """
+            )
 
-            # ========================================================
-            # 🚀 ADVANCED AUTOMATION TASKS
-            # ========================================================
-            #
-            # One row = one complete automation job.
-            #
-            # Example:
-            # User:
-            # "Amazon par shoes search karke price nikalo"
-            #
-            # task:
-            # RUNNING
-            # current_step = 4
-            # current_action = "click"
-            #
-            # Kiwi closes:
-            # PAUSED
-            #
-            # Kiwi opens:
-            # RESUMING
-            # ========================================================
+            # ---------------------------------------------------
+            # AUTOMATION TASKS
+            # ---------------------------------------------------
 
-            cursor.execute("""
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS automation_tasks (
                     id TEXT PRIMARY KEY,
-
                     session_id TEXT,
-
                     campaign_id TEXT,
-
                     title TEXT,
                     user_command TEXT,
 
@@ -219,727 +454,2583 @@ def init_db():
                     current_action TEXT,
                     current_url TEXT,
 
-                    plan_json TEXT,
-                    completed_steps_json TEXT,
-
-                    pending_action_json TEXT,
-                    last_result_json TEXT,
+                    plan_json TEXT DEFAULT '{}',
+                    completed_steps_json TEXT DEFAULT '[]',
+                    pending_action_json TEXT DEFAULT '{}',
+                    last_result_json TEXT DEFAULT '{}',
 
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 3,
 
                     last_error TEXT,
 
-                    created_at TEXT,
+                    created_at TEXT NOT NULL,
                     started_at TEXT,
                     paused_at TEXT,
                     resumed_at TEXT,
                     completed_at TEXT,
                     stopped_at TEXT,
-                    updated_at TEXT,
+                    updated_at TEXT NOT NULL,
 
                     extension_id TEXT,
                     browser_name TEXT,
 
                     is_deleted INTEGER DEFAULT 0
                 )
-            """)
+                """
+            )
 
-            # ========================================================
-            # 🚀 AUTOMATION STEPS
-            # ========================================================
-            #
-            # One row = one planned/executed action.
-            #
-            # 1 OPEN
-            # 2 SCAN
-            # 3 FIND
-            # 4 TYPE
-            # 5 CLICK
-            # 6 WAIT
-            # 7 EXTRACT
-            # ========================================================
+            # ---------------------------------------------------
+            # AUTOMATION SESSIONS
+            # ---------------------------------------------------
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS automation_steps (
-                    id TEXT PRIMARY KEY,
-
-                    task_id TEXT,
-
-                    step_number INTEGER,
-
-                    action TEXT,
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS automation_sessions (
+                    session_id TEXT PRIMARY KEY,
 
                     status TEXT DEFAULT 'PENDING',
 
-                    command_json TEXT,
-                    result_json TEXT,
+                    title TEXT DEFAULT '',
+                    user_command TEXT DEFAULT '',
 
-                    target TEXT,
-                    selector TEXT,
-                    text_value TEXT,
+                    plan_json TEXT DEFAULT '{}',
 
-                    url_before TEXT,
-                    url_after TEXT,
+                    current_step INTEGER DEFAULT 0,
+                    current_action TEXT DEFAULT '',
+                    current_url TEXT DEFAULT '',
+
+                    last_result_json TEXT DEFAULT '{}',
+                    checkpoint_json TEXT DEFAULT '{}',
+
+                    last_error TEXT,
 
                     retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 3,
+
+                    pause_reason TEXT,
+
+                    extension_id TEXT,
+                    browser_name TEXT DEFAULT 'Kiwi',
+
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+
+                    completed_at TEXT
+                )
+                """
+            )
+
+            # ---------------------------------------------------
+            # AUTOMATION STEPS
+            # ---------------------------------------------------
+
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS automation_steps (
+                    step_id TEXT PRIMARY KEY,
+
+                    session_id TEXT NOT NULL,
+
+                    sequence INTEGER NOT NULL,
+
+                    action TEXT NOT NULL,
+
+                    target TEXT DEFAULT '',
+
+                    input_json TEXT DEFAULT '{}',
+
+                    status TEXT DEFAULT 'PENDING',
+
+                    attempt_count INTEGER DEFAULT 0,
+                    max_attempts INTEGER DEFAULT 3,
+
+                    result_json TEXT DEFAULT '{}',
 
                     error TEXT,
 
                     started_at TEXT,
                     completed_at TEXT,
-                    updated_at TEXT,
 
-                    FOREIGN KEY(task_id)
-                        REFERENCES automation_tasks(id)
+                    FOREIGN KEY(session_id)
+                        REFERENCES automation_sessions(session_id)
                         ON DELETE CASCADE
                 )
-            """)
+                """
+            )
 
-            # ========================================================
-            # 🚀 AUTOMATION EVENTS
-            # ========================================================
-            #
-            # Complete history:
-            #
-            # TASK_CREATED
-            # COMMAND_SENT
-            # COMMAND_RESULT
-            # CHECKPOINT_SAVED
-            # PAUSED
-            # RESUMED
-            # RETRY
-            # HUMAN_REQUIRED
-            # COMPLETED
-            # FAILED
-            # ========================================================
+            # ---------------------------------------------------
+            # AUTOMATION CHECKPOINTS
+            # ---------------------------------------------------
 
-            cursor.execute("""
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS automation_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+
+                    session_id TEXT NOT NULL,
+
+                    current_step INTEGER DEFAULT 0,
+                    current_action TEXT DEFAULT '',
+                    current_url TEXT DEFAULT '',
+
+                    snapshot_json TEXT DEFAULT '{}',
+
+                    created_at TEXT NOT NULL,
+
+                    FOREIGN KEY(session_id)
+                        REFERENCES automation_sessions(session_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+
+            # ---------------------------------------------------
+            # AUTOMATION EVENTS
+            # ---------------------------------------------------
+
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS automation_events (
                     id TEXT PRIMARY KEY,
 
+                    session_id TEXT,
                     task_id TEXT,
-                    step_number INTEGER,
 
-                    event_type TEXT,
+                    step_number INTEGER DEFAULT 0,
 
-                    message TEXT,
-                    data_json TEXT,
+                    event_type TEXT NOT NULL,
+                    message TEXT DEFAULT '',
 
-                    created_at TEXT,
+                    data_json TEXT DEFAULT '{}',
 
-                    FOREIGN KEY(task_id)
-                        REFERENCES automation_tasks(id)
-                        ON DELETE CASCADE
+                    created_at TEXT NOT NULL
                 )
-            """)
+                """
+            )
 
-            # ========================================================
-            # 🚀 AUTOMATION CHECKPOINTS
-            # ========================================================
-            #
-            # This is the key table for:
-            #
-            # Kiwi CLOSE
-            # ↓
-            # 1-2 hours
-            # ↓
-            # Kiwi OPEN
-            # ↓
-            # RESUME
-            #
-            # The logical state survives browser closure.
-            # ========================================================
+            # ---------------------------------------------------
+            # BRIDGE COMMANDS
+            # ---------------------------------------------------
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS automation_checkpoints (
-                    id TEXT PRIMARY KEY,
-
-                    task_id TEXT,
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bridge_commands (
+                    command_id TEXT PRIMARY KEY,
 
                     session_id TEXT,
 
-                    step_number INTEGER,
+                    action TEXT NOT NULL,
+
+                    payload_json TEXT DEFAULT '{}',
+
+                    status TEXT DEFAULT 'queued',
+
+                    priority INTEGER DEFAULT 0,
+
+                    attempts INTEGER DEFAULT 0,
+                    max_attempts INTEGER DEFAULT 3,
+
+                    available_at TEXT,
+
+                    locked_at TEXT,
+                    completed_at TEXT,
+
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+
+                    result_id TEXT,
+
+                    error TEXT
+                )
+                """
+            )
+
+            # ---------------------------------------------------
+            # BRIDGE RESULTS
+            # ---------------------------------------------------
+
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bridge_results (
+                    result_id TEXT PRIMARY KEY,
+
+                    command_id TEXT NOT NULL,
+
+                    session_id TEXT,
 
                     action TEXT,
 
-                    status TEXT,
+                    success INTEGER DEFAULT 0,
 
-                    current_url TEXT,
+                    result_json TEXT DEFAULT '{}',
 
-                    page_title TEXT,
+                    error TEXT,
 
-                    state_json TEXT,
+                    created_at TEXT NOT NULL,
 
-                    last_result_json TEXT,
-
-                    created_at TEXT,
-                    updated_at TEXT,
-
-                    FOREIGN KEY(task_id)
-                        REFERENCES automation_tasks(id)
+                    FOREIGN KEY(command_id)
+                        REFERENCES bridge_commands(command_id)
                         ON DELETE CASCADE
                 )
-            """)
+                """
+            )
 
-            # ========================================================
-            # 🚀 AUTOMATION SESSIONS
-            # ========================================================
-            #
-            # A task may have:
-            #
-            # Session 1 → Kiwi running
-            # Session 2 → Kiwi reopened
-            #
-            # Useful for reconnect/resume tracking.
-            # ========================================================
+            # ---------------------------------------------------
+            # EXTENSION REGISTRATIONS
+            # ---------------------------------------------------
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS automation_sessions (
-                    id TEXT PRIMARY KEY,
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS extension_registrations (
+                    extension_id TEXT PRIMARY KEY,
 
-                    task_id TEXT,
+                    extension_name TEXT DEFAULT '',
 
-                    extension_id TEXT,
-                    browser_name TEXT,
+                    extension_version TEXT DEFAULT '',
 
-                    status TEXT DEFAULT 'CONNECTED',
+                    browser TEXT DEFAULT 'Kiwi',
 
-                    started_at TEXT,
-                    last_seen_at TEXT,
-                    disconnected_at TEXT,
+                    capabilities_json TEXT DEFAULT '[]',
 
-                    metadata_json TEXT,
+                    registered_at TEXT NOT NULL,
 
-                    FOREIGN KEY(task_id)
-                        REFERENCES automation_tasks(id)
-                        ON DELETE CASCADE
+                    last_seen TEXT NOT NULL,
+
+                    disconnected_at TEXT
                 )
-            """)
+                """
+            )
 
-            # ========================================================
+            # ---------------------------------------------------
             # INDEXES
-            # ========================================================
+            # ---------------------------------------------------
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_campaign
+            indexes = [
+
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_messages_campaign
                 ON messages(campaign_id)
-            """)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_campaigns_updated
-                ON campaigns(updated_at)
-            """)
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_messages_created
+                ON messages(created_at)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_tasks_status
-                ON automation_tasks(status)
-            """)
-
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_tasks_session
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_tasks_session
                 ON automation_tasks(session_id)
-            """)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_steps_task
-                ON automation_steps(task_id, step_number)
-            """)
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_tasks_status
+                ON automation_tasks(status)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_events_task
-                ON automation_events(task_id, created_at)
-            """)
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_sessions_status
+                ON automation_sessions(status)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_checkpoints_task
-                ON automation_checkpoints(task_id, updated_at)
-            """)
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_steps_session_sequence
+                ON automation_steps(session_id, sequence)
+                """,
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_sessions_task
-                ON automation_sessions(task_id)
-            """)
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_checkpoints_session
+                ON automation_checkpoints(session_id)
+                """,
 
-            conn.commit()
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_events_session
+                ON automation_events(session_id)
+                """,
 
-            print("✅ Existing database tables preserved!")
-            print("✅ Automation task memory ready!")
-            print("✅ Checkpoint / Resume memory ready!")
-            print("✅ Step history ready!")
-            print("✅ Session tracking ready!")
-            print("✅ Database initialized!")
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_bridge_commands_status
+                ON bridge_commands(status, priority, created_at)
+                """,
+
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_bridge_commands_session
+                ON bridge_commands(session_id)
+                """,
+
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_bridge_results_command
+                ON bridge_results(command_id)
+                """,
+
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_extension_last_seen
+                ON extension_registrations(last_seen)
+                """
+            ]
+
+            for statement in indexes:
+                try:
+                    connection.execute(statement)
+                except Exception as e:
+                    _log_db_error(
+                        "index_creation",
+                        e
+                    )
+
+            # ---------------------------------------------------
+            # COMPATIBLE MIGRATIONS
+            # ---------------------------------------------------
+
+            _run_safe_migrations(
+                connection
+            )
+
+            # ---------------------------------------------------
+            # DATABASE VERSION
+            # ---------------------------------------------------
+
+            connection.execute(
+                """
+                INSERT INTO schema_meta
+                (key, value, updated_at)
+
+                VALUES
+                ('db_version', ?, ?)
+
+                ON CONFLICT(key)
+                DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    str(DB_VERSION),
+                    _utc_now()
+                )
+            )
+
+            connection.commit()
+
+            # Compatibility globals
+            conn = connection
+            cursor = connection.cursor()
+
+            print(
+                f"✅ Database initialized successfully "
+                f"(schema v{DB_VERSION})"
+            )
+
+            return True
 
         except Exception as e:
-            _log_db_error("init_db", e)
-            raise
 
+            _log_db_error(
+                "init_db",
+                e
+            )
 
-def get_cursor():
-    """
-    Preserve compatibility with existing code.
-
-    NOTE:
-    For new automation code, prefer the dedicated DB functions below
-    instead of directly modifying the returned cursor.
-    """
-    return cursor
-
-
-def commit():
-    """Safely commit current transaction."""
-    with _db_lock:
-        try:
-            if conn:
-                conn.commit()
-                return True
-        except Exception as e:
-            _log_db_error("commit", e)
             return False
 
-    return False
+
+# ===============================================================
+# 9. SAFE MIGRATION ENGINE
+# ===============================================================
+
+def _run_safe_migrations(connection):
+    """
+    Add missing compatible columns without deleting data.
+
+    This is intentionally conservative.
+    """
+
+    # -----------------------------------------------------------
+    # campaigns
+    # -----------------------------------------------------------
+
+    campaign_columns = {
+        "description": "TEXT DEFAULT ''",
+        "message_count": "INTEGER DEFAULT 0",
+        "question_count": "INTEGER DEFAULT 0",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+        "is_deleted": "INTEGER DEFAULT 0"
+    }
+
+    for name, definition in campaign_columns.items():
+
+        try:
+            _add_column_if_missing(
+                connection,
+                "campaigns",
+                name,
+                definition
+            )
+        except Exception as e:
+            _log_db_error(
+                f"migration campaigns.{name}",
+                e
+            )
+
+    # -----------------------------------------------------------
+    # automation_tasks
+    # -----------------------------------------------------------
+
+    task_columns = {
+
+        "session_id": "TEXT",
+        "campaign_id": "TEXT",
+        "title": "TEXT",
+        "user_command": "TEXT",
+
+        "status": "TEXT DEFAULT 'PENDING'",
+
+        "current_step": "INTEGER DEFAULT 0",
+        "total_steps": "INTEGER DEFAULT 0",
+
+        "current_action": "TEXT",
+        "current_url": "TEXT",
+
+        "plan_json": "TEXT DEFAULT '{}'",
+        "completed_steps_json": "TEXT DEFAULT '[]'",
+        "pending_action_json": "TEXT DEFAULT '{}'",
+        "last_result_json": "TEXT DEFAULT '{}'",
+
+        "retry_count": "INTEGER DEFAULT 0",
+        "max_retries": "INTEGER DEFAULT 3",
+
+        "last_error": "TEXT",
+
+        "created_at": "TEXT",
+        "started_at": "TEXT",
+        "paused_at": "TEXT",
+        "resumed_at": "TEXT",
+        "completed_at": "TEXT",
+        "stopped_at": "TEXT",
+        "updated_at": "TEXT",
+
+        "extension_id": "TEXT",
+        "browser_name": "TEXT",
+
+        "is_deleted": "INTEGER DEFAULT 0"
+    }
+
+    for name, definition in task_columns.items():
+
+        try:
+            _add_column_if_missing(
+                connection,
+                "automation_tasks",
+                name,
+                definition
+            )
+        except Exception as e:
+            _log_db_error(
+                f"migration automation_tasks.{name}",
+                e
+            )
+
+    # -----------------------------------------------------------
+    # automation_sessions
+    # -----------------------------------------------------------
+
+    session_columns = {
+
+        "session_id": "TEXT",
+        "status": "TEXT DEFAULT 'PENDING'",
+        "title": "TEXT DEFAULT ''",
+        "user_command": "TEXT DEFAULT ''",
+        "plan_json": "TEXT DEFAULT '{}'",
+        "current_step": "INTEGER DEFAULT 0",
+        "current_action": "TEXT DEFAULT ''",
+        "current_url": "TEXT DEFAULT ''",
+        "last_result_json": "TEXT DEFAULT '{}'",
+        "checkpoint_json": "TEXT DEFAULT '{}'",
+        "last_error": "TEXT",
+        "retry_count": "INTEGER DEFAULT 0",
+        "max_retries": "INTEGER DEFAULT 3",
+        "pause_reason": "TEXT",
+        "extension_id": "TEXT",
+        "browser_name": "TEXT DEFAULT 'Kiwi'",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+        "completed_at": "TEXT"
+    }
+
+    for name, definition in session_columns.items():
+
+        try:
+            _add_column_if_missing(
+                connection,
+                "automation_sessions",
+                name,
+                definition
+            )
+        except Exception as e:
+            _log_db_error(
+                f"migration automation_sessions.{name}",
+                e
+            )
+
+    # -----------------------------------------------------------
+    # automation_steps
+    # -----------------------------------------------------------
+
+    step_columns = {
+
+        "step_id": "TEXT",
+        "session_id": "TEXT",
+        "sequence": "INTEGER DEFAULT 0",
+        "action": "TEXT",
+        "target": "TEXT DEFAULT ''",
+        "input_json": "TEXT DEFAULT '{}'",
+        "status": "TEXT DEFAULT 'PENDING'",
+        "attempt_count": "INTEGER DEFAULT 0",
+        "max_attempts": "INTEGER DEFAULT 3",
+        "result_json": "TEXT DEFAULT '{}'",
+        "error": "TEXT",
+        "started_at": "TEXT",
+        "completed_at": "TEXT"
+    }
+
+    for name, definition in step_columns.items():
+
+        try:
+            _add_column_if_missing(
+                connection,
+                "automation_steps",
+                name,
+                definition
+            )
+        except Exception as e:
+            _log_db_error(
+                f"migration automation_steps.{name}",
+                e
+            )
+
+    # -----------------------------------------------------------
+    # automation_checkpoints
+    # -----------------------------------------------------------
+
+    checkpoint_columns = {
+
+        "checkpoint_id": "TEXT",
+        "session_id": "TEXT",
+        "current_step": "INTEGER DEFAULT 0",
+        "current_action": "TEXT DEFAULT ''",
+        "current_url": "TEXT DEFAULT ''",
+        "snapshot_json": "TEXT DEFAULT '{}'",
+        "created_at": "TEXT"
+    }
+
+    for name, definition in checkpoint_columns.items():
+
+        try:
+            _add_column_if_missing(
+                connection,
+                "automation_checkpoints",
+                name,
+                definition
+            )
+        except Exception as e:
+            _log_db_error(
+                f"migration automation_checkpoints.{name}",
+                e
+            )
 
 
-# ====================================================================
-# CAMPAIGN FUNCTIONS
-# ====================================================================
+# ===============================================================
+# 10. CAMPAIGN FUNCTIONS
+# ===============================================================
 
 def create_campaign(
-    campaign_id,
-    title,
-    created_at,
-    message_count=2,
-    question_count=0,
-    last_topic=""
-):
-    try:
-        with _db_lock:
-            cursor.execute("""
+    name: str,
+    description: str = ""
+) -> Optional[str]:
+
+    campaign_id = _new_id("camp_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
                 INSERT INTO campaigns
                 (
                     id,
-                    title,
-                    created_at,
-                    updated_at,
+                    name,
+                    description,
                     message_count,
                     question_count,
-                    last_topic
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                campaign_id,
-                title[:50],
-                created_at,
-                created_at,
-                message_count,
-                question_count,
-                last_topic[:100]
-            ))
-
-            commit()
-            return True
-
-    except Exception as e:
-        _log_db_error("create_campaign", e)
-        return False
-
-
-def get_campaigns(limit=50):
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT
-                    id,
-                    title,
                     created_at,
                     updated_at,
-                    message_count,
-                    question_count
-                FROM campaigns
-                WHERE is_deleted = 0
-                ORDER BY updated_at DESC
-                LIMIT ?
-            """, (limit,)).fetchall()
-
-            return [
-                {
-                    "id": r["id"],
-                    "title": r["title"] or "नई चैट",
-                    "created_at": r["created_at"],
-                    "updated_at": r["updated_at"],
-                    "messages": r["message_count"] or 0,
-                    "questions": r["question_count"] or 0
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_campaigns", e)
-        return []
-
-
-def get_campaign(campaign_id):
-    try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT
-                    title,
-                    question_count,
                     is_deleted
-                FROM campaigns
-                WHERE id = ?
-            """, (campaign_id,)).fetchone()
+                )
+                VALUES (?, ?, ?, 0, 0, ?, ?, 0)
+                """,
+                (
+                    campaign_id,
+                    name,
+                    description,
+                    now,
+                    now
+                )
+            )
 
-            if row:
-                return {
-                    "title": row["title"],
-                    "question_count": row["question_count"],
-                    "is_deleted": row["is_deleted"]
-                }
+            connection.commit()
+
+            return campaign_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "create_campaign",
+                e
+            )
 
             return None
 
-    except Exception as e:
-        _log_db_error("get_campaign", e)
-        return None
+        finally:
+            connection.close()
 
 
-def update_campaign(
-    campaign_id,
-    updated_at,
-    message_count_increment=2,
-    question_count=None,
-    last_topic=""
+def get_campaign(campaign_id: str):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM campaigns
+            WHERE id=?
+            """,
+            (campaign_id,)
+        ).fetchone()
+
+        return dict(row) if row else None
+
+    finally:
+        connection.close()
+
+
+def get_campaigns(
+    include_deleted: bool = False
 ):
+
+    connection = get_connection()
+
     try:
-        with _db_lock:
 
-            if question_count is not None:
-                cursor.execute("""
-                    UPDATE campaigns
-                    SET
-                        updated_at = ?,
-                        message_count = message_count + ?,
-                        question_count = ?,
-                        last_topic = ?
-                    WHERE id = ?
-                """, (
-                    updated_at,
-                    message_count_increment,
-                    question_count,
-                    last_topic[:100],
+        if include_deleted:
+
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM campaigns
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+
+        else:
+
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM campaigns
+                WHERE is_deleted=0
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    finally:
+        connection.close()
+
+
+def rename_campaign(
+    campaign_id: str,
+    name: str
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                UPDATE campaigns
+                SET name=?,
+                    updated_at=?
+                WHERE id=?
+                """,
+                (
+                    name,
+                    _utc_now(),
                     campaign_id
-                ))
-
-            else:
-                cursor.execute("""
-                    UPDATE campaigns
-                    SET
-                        updated_at = ?,
-                        message_count = message_count + ?,
-                        last_topic = ?
-                    WHERE id = ?
-                """, (
-                    updated_at,
-                    message_count_increment,
-                    last_topic[:100],
-                    campaign_id
-                ))
-
-            commit()
-            return True
-
-    except Exception as e:
-        _log_db_error("update_campaign", e)
-        return False
-
-
-def rename_campaign(campaign_id, new_name):
-    try:
-        with _db_lock:
-            cursor.execute(
-                "UPDATE campaigns SET title=? WHERE id=?",
-                (new_name[:200], campaign_id)
+                )
             )
 
-            commit()
+            connection.commit()
+
             return True
 
-    except Exception as e:
-        _log_db_error("rename_campaign", e)
-        return False
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "rename_campaign",
+                e
+            )
+
+            return False
+
+        finally:
+            connection.close()
 
 
-def delete_campaign(campaign_id, now):
-    try:
-        with _db_lock:
-            cursor.execute("""
+def delete_campaign(
+    campaign_id: str
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
                 UPDATE campaigns
-                SET
-                    is_deleted = 1,
-                    updated_at = ?
-                WHERE id = ?
-            """, (now, campaign_id))
+                SET is_deleted=1,
+                    updated_at=?
+                WHERE id=?
+                """,
+                (
+                    _utc_now(),
+                    campaign_id
+                )
+            )
 
-            commit()
+            connection.commit()
+
             return True
 
-    except Exception as e:
-        _log_db_error("delete_campaign", e)
-        return False
+        except Exception as e:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
 
 
-def restore_campaign(campaign_id):
-    try:
-        with _db_lock:
-            cursor.execute("""
+def restore_campaign(
+    campaign_id: str
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
                 UPDATE campaigns
-                SET is_deleted = 0
-                WHERE id = ?
-            """, (campaign_id,))
+                SET is_deleted=0,
+                    updated_at=?
+                WHERE id=?
+                """,
+                (
+                    _utc_now(),
+                    campaign_id
+                )
+            )
 
-            commit()
+            connection.commit()
+
             return True
 
-    except Exception as e:
-        _log_db_error("restore_campaign", e)
-        return False
+        except Exception as e:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
 
 
-# ====================================================================
-# MESSAGE FUNCTIONS
-# ====================================================================
+# ===============================================================
+# 11. MESSAGE MEMORY
+# ===============================================================
 
 def save_message(
-    msg_id,
-    campaign_id,
-    role,
-    content,
-    is_question,
-    timestamp
+    campaign_id: Optional[str],
+    role: str,
+    content: str
 ):
-    try:
-        with _db_lock:
-            cursor.execute("""
+
+    message_id = _new_id("msg_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
                 INSERT INTO messages
                 (
                     id,
                     campaign_id,
                     role,
                     content,
-                    is_question,
-                    timestamp
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                msg_id,
-                campaign_id,
-                role,
-                content,
-                is_question,
-                timestamp
-            ))
-
-            commit()
-            return True
-
-    except Exception as e:
-        _log_db_error("save_message", e)
-        return False
-
-
-def get_all_history(campaign_id):
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT
-                    role,
-                    content,
-                    is_question
-                FROM messages
-                WHERE campaign_id = ?
-                ORDER BY timestamp ASC
-            """, (campaign_id,)).fetchall()
-
-            return [
-                {
-                    "role": r["role"],
-                    "content": r["content"],
-                    "is_question": r["is_question"]
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_all_history", e)
-        return []
-
-
-def get_recent_history(campaign_id, limit=20):
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT
-                    role,
-                    content
-                FROM messages
-                WHERE campaign_id = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """, (campaign_id, limit)).fetchall()
-
-            return [
-                {
-                    "role": r["role"],
-                    "content": r["content"]
-                }
-                for r in reversed(rows)
-            ]
-
-    except Exception as e:
-        _log_db_error("get_recent_history", e)
-        return []
-
-
-def count_questions(campaign_id):
-    try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT COUNT(*)
-                FROM messages
-                WHERE campaign_id = ?
-                AND role = 'user'
-                AND is_question = 1
-            """, (campaign_id,)).fetchone()
-
-            return row[0] if row else 0
-
-    except Exception as e:
-        _log_db_error("count_questions", e)
-        return 0
-
-
-# ====================================================================
-# BLOG FUNCTIONS
-# ====================================================================
-
-def save_blog(
-    blog_id,
-    title,
-    content,
-    slug,
-    created_at
-):
-    try:
-        with _db_lock:
-            cursor.execute("""
-                INSERT INTO posts
-                (
-                    id,
-                    title,
-                    content,
-                    slug,
                     created_at
                 )
                 VALUES (?, ?, ?, ?, ?)
-            """, (
-                blog_id,
-                title[:200],
-                content,
-                slug,
-                created_at
-            ))
-
-            commit()
-            return True
-
-    except Exception as e:
-        _log_db_error("save_blog", e)
-        return False
-
-
-def get_blog_by_slug(slug):
-    try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT
-                    title,
+                """,
+                (
+                    message_id,
+                    campaign_id,
+                    role,
                     content,
-                    created_at
-                FROM posts
-                WHERE slug = ?
-            """, (slug,)).fetchone()
-
-            if row:
-                return (
-                    row["title"],
-                    row["content"],
-                    row["created_at"]
+                    now
                 )
+            )
+
+            connection.commit()
+
+            return message_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "save_message",
+                e
+            )
 
             return None
 
-    except Exception as e:
-        _log_db_error("get_blog_by_slug", e)
-        return None
+        finally:
+            connection.close()
 
 
-def get_all_blogs(limit=10):
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT
-                    title,
-                    slug,
-                    created_at
-                FROM posts
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (limit,)).fetchall()
-
-            return [
-                {
-                    "title": r["title"],
-                    "slug": r["slug"],
-                    "created_at": r["created_at"]
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_all_blogs", e)
-        return []
-
-
-# ====================================================================
-# 🚀 AUTOMATION TASK FUNCTIONS
-# ====================================================================
-
-def create_automation_task(
-    title,
-    user_command,
-    plan=None,
-    campaign_id=None,
-    max_retries=3,
-    task_id=None,
-    session_id=None
+def get_messages(
+    campaign_id: str,
+    limit: int = 100
 ):
-    """
-    Create a new automation task.
 
-    Returns:
-        task_id
-        or None on failure
-    """
+    connection = get_connection()
 
-    task_id = task_id or _new_id("task_")
-    session_id = session_id or _new_id("session_")
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM messages
+            WHERE campaign_id=?
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (
+                campaign_id,
+                limit
+            )
+        ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    finally:
+        connection.close()
+
+
+def get_recent_messages(
+    campaign_id: str,
+    limit: int = 20
+):
+
+    return get_messages(
+        campaign_id,
+        limit
+    )[-limit:]
+
+
+def count_messages(
+    campaign_id: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM messages
+            WHERE campaign_id=?
+            """,
+            (campaign_id,)
+        ).fetchone()
+
+        return int(row["count"])
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 12. BLOG FUNCTIONS
+# ===============================================================
+
+def save_blog(
+    slug: str,
+    title: str,
+    content: str,
+    status: str = "draft"
+):
+
+    post_id = _new_id("post_")
     now = _utc_now()
 
-    try:
-        with _db_lock:
+    with _db_lock:
 
-            cursor.execute("""
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO posts
+                (
+                    id,
+                    slug,
+                    title,
+                    content,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    post_id,
+                    slug,
+                    title,
+                    content,
+                    status,
+                    now,
+                    now
+                )
+            )
+
+            connection.commit()
+
+            return post_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "save_blog",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_blog(
+    slug: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM posts
+            WHERE slug=?
+            """,
+            (slug,)
+        ).fetchone()
+
+        return dict(row) if row else None
+
+    finally:
+        connection.close()
+
+
+def get_blogs():
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM posts
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 13. AUTOMATION SESSION
+# ===============================================================
+
+def create_automation_session(
+    title: str = "",
+    user_command: str = "",
+    plan: Optional[Dict[str, Any]] = None,
+    extension_id: Optional[str] = None,
+    browser_name: str = "Kiwi",
+    max_retries: int = 3
+):
+
+    session_id = _new_id("session_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO automation_sessions
+                (
+                    session_id,
+                    status,
+                    title,
+                    user_command,
+                    plan_json,
+                    current_step,
+                    current_action,
+                    current_url,
+                    last_result_json,
+                    checkpoint_json,
+                    retry_count,
+                    max_retries,
+                    extension_id,
+                    browser_name,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    ?, 'PENDING', ?, ?, ?,
+                    0, '', '',
+                    '{}', '{}',
+                    0, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    session_id,
+                    title,
+                    user_command,
+                    _json_dumps(
+                        plan or {}
+                    ),
+                    max_retries,
+                    extension_id,
+                    browser_name,
+                    now,
+                    now
+                )
+            )
+
+            connection.commit()
+
+            return session_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "create_automation_session",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_automation_session(
+    session_id: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM automation_sessions
+            WHERE session_id=?
+            """,
+            (session_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return _session_row_to_dict(
+            row
+        )
+
+    finally:
+        connection.close()
+
+
+def _session_row_to_dict(row):
+
+    data = dict(row)
+
+    for field in [
+        "plan_json",
+        "last_result_json",
+        "checkpoint_json"
+    ]:
+
+        if field in data:
+            data[field] = _json_loads(
+                data[field],
+                {}
+            )
+
+    return data
+
+
+def update_automation_session(
+    session_id: str,
+    **fields
+):
+
+    if not fields:
+        return False
+
+    allowed = {
+        "status",
+        "title",
+        "user_command",
+        "plan_json",
+        "current_step",
+        "current_action",
+        "current_url",
+        "last_result_json",
+        "checkpoint_json",
+        "last_error",
+        "retry_count",
+        "max_retries",
+        "pause_reason",
+        "extension_id",
+        "browser_name",
+        "completed_at"
+    }
+
+    updates = {}
+
+    for key, value in fields.items():
+
+        if key not in allowed:
+            continue
+
+        if key in {
+            "plan_json",
+            "last_result_json",
+            "checkpoint_json"
+        }:
+            value = _json_dumps(value)
+
+        updates[key] = value
+
+    if not updates:
+        return False
+
+    updates["updated_at"] = _utc_now()
+
+    set_clause = ", ".join(
+        f"{key}=?"
+        for key in updates
+    )
+
+    values = list(
+        updates.values()
+    )
+
+    values.append(
+        session_id
+    )
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                f"""
+                UPDATE automation_sessions
+                SET {set_clause}
+                WHERE session_id=?
+                """,
+                values
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "update_automation_session",
+                e
+            )
+
+            return False
+
+        finally:
+            connection.close()
+
+
+# ===============================================================
+# 14. AUTOMATION STEPS
+# ===============================================================
+
+def create_automation_step(
+    session_id: str,
+    sequence: int,
+    action: str,
+    target: str = "",
+    input_data: Optional[Dict[str, Any]] = None,
+    max_attempts: int = 3
+):
+
+    step_id = _new_id("step_")
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO automation_steps
+                (
+                    step_id,
+                    session_id,
+                    sequence,
+                    action,
+                    target,
+                    input_json,
+                    status,
+                    attempt_count,
+                    max_attempts
+                )
+                VALUES
+                (?, ?, ?, ?, ?, ?, 'PENDING', 0, ?)
+                """,
+                (
+                    step_id,
+                    session_id,
+                    sequence,
+                    action,
+                    target,
+                    _json_dumps(
+                        input_data or {}
+                    ),
+                    max_attempts
+                )
+            )
+
+            connection.commit()
+
+            return step_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "create_automation_step",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_automation_steps(
+    session_id: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM automation_steps
+            WHERE session_id=?
+            ORDER BY sequence ASC
+            """,
+            (session_id,)
+        ).fetchall()
+
+        result = []
+
+        for row in rows:
+
+            item = dict(row)
+
+            item["input_json"] = _json_loads(
+                item.get("input_json"),
+                {}
+            )
+
+            item["result_json"] = _json_loads(
+                item.get("result_json"),
+                {}
+            )
+
+            result.append(item)
+
+        return result
+
+    finally:
+        connection.close()
+
+
+def update_automation_step(
+    step_id: str,
+    **fields
+):
+
+    allowed = {
+        "status",
+        "attempt_count",
+        "result_json",
+        "error",
+        "started_at",
+        "completed_at",
+        "target",
+        "input_json"
+    }
+
+    updates = {}
+
+    for key, value in fields.items():
+
+        if key not in allowed:
+            continue
+
+        if key in {
+            "result_json",
+            "input_json"
+        }:
+            value = _json_dumps(value)
+
+        updates[key] = value
+
+    if not updates:
+        return False
+
+    set_clause = ", ".join(
+        f"{key}=?"
+        for key in updates
+    )
+
+    values = list(
+        updates.values()
+    )
+
+    values.append(
+        step_id
+    )
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                f"""
+                UPDATE automation_steps
+                SET {set_clause}
+                WHERE step_id=?
+                """,
+                values
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception as e:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
+
+
+# ===============================================================
+# 15. CHECKPOINT / RESUME
+# ===============================================================
+
+def save_automation_checkpoint(
+    session_id: str,
+    current_step: int = 0,
+    current_action: str = "",
+    current_url: str = "",
+    snapshot: Optional[Dict[str, Any]] = None
+):
+
+    checkpoint_id = _new_id(
+        "checkpoint_"
+    )
+
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO automation_checkpoints
+                (
+                    checkpoint_id,
+                    session_id,
+                    current_step,
+                    current_action,
+                    current_url,
+                    snapshot_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    checkpoint_id,
+                    session_id,
+                    current_step,
+                    current_action,
+                    current_url,
+                    _json_dumps(
+                        snapshot or {}
+                    ),
+                    now
+                )
+            )
+
+            connection.execute(
+                """
+                UPDATE automation_sessions
+                SET
+                    current_step=?,
+                    current_action=?,
+                    current_url=?,
+                    checkpoint_json=?,
+                    updated_at=?
+                WHERE session_id=?
+                """,
+                (
+                    current_step,
+                    current_action,
+                    current_url,
+                    _json_dumps(
+                        snapshot or {}
+                    ),
+                    now,
+                    session_id
+                )
+            )
+
+            connection.commit()
+
+            return checkpoint_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "save_automation_checkpoint",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_latest_automation_checkpoint(
+    session_id: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM automation_checkpoints
+            WHERE session_id=?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        result = dict(row)
+
+        result["snapshot_json"] = _json_loads(
+            result.get("snapshot_json"),
+            {}
+        )
+
+        return result
+
+    finally:
+        connection.close()
+
+
+def get_checkpoint_history(
+    session_id: str,
+    limit: int = 50
+):
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM automation_checkpoints
+            WHERE session_id=?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (
+                session_id,
+                limit
+            )
+        ).fetchall()
+
+        result = []
+
+        for row in rows:
+
+            item = dict(row)
+
+            item["snapshot_json"] = _json_loads(
+                item.get("snapshot_json"),
+                {}
+            )
+
+            result.append(item)
+
+        return result
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 16. AUTOMATION EVENTS
+# ===============================================================
+
+def add_automation_event(
+    session_id: str,
+    event_type: str,
+    message: str = "",
+    data: Optional[Dict[str, Any]] = None,
+    step_number: int = 0,
+    task_id: Optional[str] = None
+):
+
+    event_id = _new_id("event_")
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO automation_events
+                (
+                    id,
+                    session_id,
+                    task_id,
+                    step_number,
+                    event_type,
+                    message,
+                    data_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    session_id,
+                    task_id,
+                    step_number,
+                    event_type,
+                    message,
+                    _json_dumps(
+                        data or {}
+                    ),
+                    _utc_now()
+                )
+            )
+
+            connection.commit()
+
+            return event_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_automation_events(
+    session_id: str,
+    limit: int = 100
+):
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM automation_events
+            WHERE session_id=?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (
+                session_id,
+                limit
+            )
+        ).fetchall()
+
+        result = []
+
+        for row in rows:
+
+            item = dict(row)
+
+            item["data_json"] = _json_loads(
+                item.get("data_json"),
+                {}
+            )
+
+            result.append(item)
+
+        return result
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 17. BRIDGE COMMANDS
+# ===============================================================
+
+def create_bridge_command(
+    action: str,
+    payload: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
+    priority: int = 0,
+    max_attempts: int = 3,
+    available_at: Optional[str] = None
+):
+
+    command_id = _new_id("cmd_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO bridge_commands
+                (
+                    command_id,
+                    session_id,
+                    action,
+                    payload_json,
+                    status,
+                    priority,
+                    attempts,
+                    max_attempts,
+                    available_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    ?, ?, ?, ?, 'queued',
+                    ?, 0, ?, ?, ?, ?
+                )
+                """,
+                (
+                    command_id,
+                    session_id,
+                    action,
+                    _json_dumps(
+                        payload or {}
+                    ),
+                    priority,
+                    max_attempts,
+                    available_at,
+                    now,
+                    now
+                )
+            )
+
+            connection.commit()
+
+            return command_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "create_bridge_command",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def claim_next_bridge_command(
+    extension_id: Optional[str] = None
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            now = _utc_now()
+
+            # ---------------------------------------------------
+            # First recover commands locked for too long.
+            # ---------------------------------------------------
+
+            connection.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status='queued',
+                    locked_at=NULL,
+                    updated_at=?
+                WHERE status='processing'
+                  AND locked_at IS NOT NULL
+                  AND locked_at < datetime(?, '-5 minutes')
+                """,
+                (
+                    now,
+                    now
+                )
+            )
+
+            row = connection.execute(
+                """
+                SELECT *
+                FROM bridge_commands
+                WHERE status='queued'
+                  AND (
+                        available_at IS NULL
+                        OR available_at <= ?
+                  )
+                  AND attempts < max_attempts
+                ORDER BY
+                    priority DESC,
+                    created_at ASC
+                LIMIT 1
+                """,
+                (now,)
+            ).fetchone()
+
+            if not row:
+                connection.commit()
+                return None
+
+            command_id = row["command_id"]
+
+            connection.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status='processing',
+                    attempts=attempts+1,
+                    locked_at=?,
+                    updated_at=?
+                WHERE command_id=?
+                  AND status='queued'
+                """,
+                (
+                    now,
+                    now,
+                    command_id
+                )
+            )
+
+            connection.commit()
+
+            result = dict(row)
+
+            result["status"] = "processing"
+            result["attempts"] = (
+                int(result.get("attempts") or 0) + 1
+            )
+
+            result["payload_json"] = _json_loads(
+                result.get("payload_json"),
+                {}
+            )
+
+            return result
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "claim_next_bridge_command",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def complete_bridge_command(
+    command_id: str,
+    result_id: Optional[str] = None
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            now = _utc_now()
+
+            connection.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status='completed',
+                    result_id=?,
+                    completed_at=?,
+                    updated_at=?,
+                    locked_at=NULL
+                WHERE command_id=?
+                """,
+                (
+                    result_id,
+                    now,
+                    now,
+                    command_id
+                )
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception as e:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
+
+
+def fail_bridge_command(
+    command_id: str,
+    error: str,
+    retry: bool = True
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            row = connection.execute(
+                """
+                SELECT attempts, max_attempts
+                FROM bridge_commands
+                WHERE command_id=?
+                """,
+                (command_id,)
+            ).fetchone()
+
+            if not row:
+                return False
+
+            attempts = int(
+                row["attempts"] or 0
+            )
+
+            max_attempts = int(
+                row["max_attempts"] or 3
+            )
+
+            should_retry = (
+                retry
+                and attempts < max_attempts
+            )
+
+            status = (
+                "queued"
+                if should_retry
+                else "failed"
+            )
+
+            now = _utc_now()
+
+            connection.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status=?,
+                    error=?,
+                    locked_at=NULL,
+                    updated_at=?
+                WHERE command_id=?
+                """,
+                (
+                    status,
+                    error,
+                    now,
+                    command_id
+                )
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
+
+
+# ===============================================================
+# 18. BRIDGE RESULTS
+# ===============================================================
+
+def save_bridge_result(
+    command_id: str,
+    session_id: Optional[str],
+    action: str,
+    success: bool,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None
+):
+
+    result_id = _new_id("result_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO bridge_results
+                (
+                    result_id,
+                    command_id,
+                    session_id,
+                    action,
+                    success,
+                    result_json,
+                    error,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result_id,
+                    command_id,
+                    session_id,
+                    action,
+                    1 if success else 0,
+                    _json_dumps(
+                        result or {}
+                    ),
+                    error,
+                    now
+                )
+            )
+
+            connection.execute(
+                """
+                UPDATE bridge_commands
+                SET
+                    status=?,
+                    result_id=?,
+                    completed_at=?,
+                    updated_at=?,
+                    locked_at=NULL,
+                    error=?
+                WHERE command_id=?
+                """,
+                (
+                    "completed"
+                    if success
+                    else "failed",
+                    result_id,
+                    now,
+                    now,
+                    error,
+                    command_id
+                )
+            )
+
+            connection.commit()
+
+            return result_id
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "save_bridge_result",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
+
+
+def get_bridge_result(
+    command_id: str
+):
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM bridge_results
+            WHERE command_id=?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (command_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        result = dict(row)
+
+        result["result_json"] = _json_loads(
+            result.get("result_json"),
+            {}
+        )
+
+        return result
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 19. EXTENSION REGISTRATION
+# ===============================================================
+
+def register_extension(
+    extension_id: str,
+    extension_name: str = "",
+    extension_version: str = "",
+    browser: str = "Kiwi",
+    capabilities: Optional[List[str]] = None
+):
+
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                INSERT INTO extension_registrations
+                (
+                    extension_id,
+                    extension_name,
+                    extension_version,
+                    browser,
+                    capabilities_json,
+                    registered_at,
+                    last_seen,
+                    disconnected_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+
+                ON CONFLICT(extension_id)
+                DO UPDATE SET
+                    extension_name=excluded.extension_name,
+                    extension_version=excluded.extension_version,
+                    browser=excluded.browser,
+                    capabilities_json=excluded.capabilities_json,
+                    last_seen=excluded.last_seen,
+                    disconnected_at=NULL
+                """,
+                (
+                    extension_id,
+                    extension_name,
+                    extension_version,
+                    browser,
+                    _json_dumps(
+                        capabilities or []
+                    ),
+                    now,
+                    now
+                )
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "register_extension",
+                e
+            )
+
+            return False
+
+        finally:
+            connection.close()
+
+
+def heartbeat_extension(
+    extension_id: str
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
+                UPDATE extension_registrations
+                SET
+                    last_seen=?,
+                    disconnected_at=NULL
+                WHERE extension_id=?
+                """,
+                (
+                    _utc_now(),
+                    extension_id
+                )
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
+
+
+def disconnect_extension(
+    extension_id: str
+):
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            now = _utc_now()
+
+            connection.execute(
+                """
+                UPDATE extension_registrations
+                SET disconnected_at=?
+                WHERE extension_id=?
+                """,
+                (
+                    now,
+                    extension_id
+                )
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception:
+
+            connection.rollback()
+
+            return False
+
+        finally:
+            connection.close()
+
+
+def get_latest_extension():
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM extension_registrations
+            ORDER BY last_seen DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+        if not row:
+            return None
+
+        result = dict(row)
+
+        result["capabilities_json"] = _json_loads(
+            result.get("capabilities_json"),
+            []
+        )
+
+        return result
+
+    finally:
+        connection.close()
+
+
+def extension_is_online(
+    extension_id: Optional[str] = None,
+    timeout_seconds: int = 120
+):
+
+    extension = None
+
+    if extension_id:
+
+        connection = get_connection()
+
+        try:
+
+            row = connection.execute(
+                """
+                SELECT *
+                FROM extension_registrations
+                WHERE extension_id=?
+                """,
+                (extension_id,)
+            ).fetchone()
+
+            extension = (
+                dict(row)
+                if row
+                else None
+            )
+
+        finally:
+            connection.close()
+
+    else:
+        extension = get_latest_extension()
+
+    if not extension:
+        return False
+
+    last_seen_value = extension.get(
+        "last_seen"
+    )
+
+    if not last_seen_value:
+        return False
+
+    try:
+
+        last_seen = datetime.fromisoformat(
+            last_seen_value
+        )
+
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(
+                tzinfo=timezone.utc
+            )
+
+        now = datetime.now(
+            timezone.utc
+        )
+
+        age = (
+            now - last_seen
+        ).total_seconds()
+
+        return age <= timeout_seconds
+
+    except Exception:
+
+        return False
+
+
+# ===============================================================
+# 20. AUTOMATION RESUME SNAPSHOT
+# ===============================================================
+
+def get_resume_snapshot(
+    session_id: str
+):
+
+    session = get_automation_session(
+        session_id
+    )
+
+    if not session:
+        return None
+
+    checkpoint = get_latest_automation_checkpoint(
+        session_id
+    )
+
+    steps = get_automation_steps(
+        session_id
+    )
+
+    return {
+        "session": session,
+        "checkpoint": checkpoint,
+        "steps": steps,
+        "resume_step": (
+            checkpoint["current_step"]
+            if checkpoint
+            else session.get(
+                "current_step",
+                0
+            )
+        )
+    }
+
+
+# ===============================================================
+# 21. DATABASE HEALTH
+# ===============================================================
+
+def database_health():
+
+    connection = None
+
+    try:
+
+        connection = get_connection()
+
+        connection.execute(
+            "SELECT 1"
+        ).fetchone()
+
+        tables = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+            ORDER BY name
+            """
+        ).fetchall()
+
+        version_row = connection.execute(
+            """
+            SELECT value
+            FROM schema_meta
+            WHERE key='db_version'
+            """
+        ).fetchone()
+
+        return {
+            "ok": True,
+            "database": DB_PATH,
+            "schema_version": (
+                version_row["value"]
+                if version_row
+                else None
+            ),
+            "tables": [
+                row["name"]
+                for row in tables
+            ],
+            "timestamp": _utc_now()
+        }
+
+    except Exception as e:
+
+        return {
+            "ok": False,
+            "database": DB_PATH,
+            "error": str(e),
+            "timestamp": _utc_now()
+        }
+
+    finally:
+
+        if connection:
+            connection.close()
+
+
+# ===============================================================
+# 22. AUTOMATION TASK COMPATIBILITY API
+# ===============================================================
+
+def create_automation_task(
+    session_id: Optional[str] = None,
+    campaign_id: Optional[str] = None,
+    title: str = "",
+    user_command: str = "",
+    total_steps: int = 0,
+    plan: Optional[Dict[str, Any]] = None,
+    max_retries: int = 3,
+    extension_id: Optional[str] = None,
+    browser_name: str = "Kiwi"
+):
+
+    task_id = _new_id("task_")
+    now = _utc_now()
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                """
                 INSERT INTO automation_tasks
                 (
                     id,
@@ -959,1623 +3050,390 @@ def create_automation_task(
                     retry_count,
                     max_retries,
                     created_at,
-                    updated_at
+                    updated_at,
+                    extension_id,
+                    browser_name,
+                    is_deleted
                 )
-                VALUES (
-                    ?, ?, ?, ?, ?, 'PENDING',
-                    0, ?, ?, ?, ?, ?, ?, ?, 0, ?,
-                    ?, ?
+                VALUES
+                (
+                    ?, ?, ?, ?, ?,
+                    'PENDING',
+                    0, ?, '', '',
+                    ?, '[]', '{}', '{}',
+                    0, ?, ?, ?, ?, ?, 0
                 )
-            """, (
-                task_id,
-                session_id,
-                campaign_id,
-                (title or "Automation Task")[:200],
-                (user_command or "")[:10000],
-                len(plan or []),
-                None,
-                None,
-                _json_dumps(plan or []),
-                _json_dumps([]),
-                _json_dumps({}),
-                _json_dumps({}),
-                max_retries,
-                now,
-                now
-            ))
-
-            commit()
-
-            add_automation_event(
-                task_id=task_id,
-                event_type="TASK_CREATED",
-                message="Automation task created",
-                data={
-                    "title": title,
-                    "session_id": session_id
-                }
+                """,
+                (
+                    task_id,
+                    session_id,
+                    campaign_id,
+                    title,
+                    user_command,
+                    total_steps,
+                    _json_dumps(
+                        plan or {}
+                    ),
+                    max_retries,
+                    now,
+                    now,
+                    extension_id,
+                    browser_name
+                )
             )
+
+            connection.commit()
 
             return task_id
 
-    except Exception as e:
-        _log_db_error("create_automation_task", e)
-        return None
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "create_automation_task",
+                e
+            )
+
+            return None
+
+        finally:
+            connection.close()
 
 
-def get_automation_task(task_id):
-    """Return one complete automation task as a dictionary."""
+def get_automation_task(
+    task_id: str
+):
+
+    connection = get_connection()
 
     try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT *
-                FROM automation_tasks
-                WHERE id = ?
-            """, (task_id,)).fetchone()
 
-            if not row:
-                return None
+        row = connection.execute(
+            """
+            SELECT *
+            FROM automation_tasks
+            WHERE id=?
+            """,
+            (task_id,)
+        ).fetchone()
 
-            return _task_row_to_dict(row)
+        if not row:
+            return None
 
-    except Exception as e:
-        _log_db_error("get_automation_task", e)
-        return None
+        result = dict(row)
+
+        for field in [
+            "plan_json",
+            "completed_steps_json",
+            "pending_action_json",
+            "last_result_json"
+        ]:
+            result[field] = _json_loads(
+                result.get(field),
+                {}
+            )
+
+        return result
+
+    finally:
+        connection.close()
 
 
-def _task_row_to_dict(row):
-    """Convert SQLite row to normal Python dictionary."""
+def update_automation_task(
+    task_id: str,
+    **fields
+):
 
-    return {
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "campaign_id": row["campaign_id"],
-
-        "title": row["title"],
-        "user_command": row["user_command"],
-
-        "status": row["status"],
-
-        "current_step": row["current_step"],
-        "total_steps": row["total_steps"],
-
-        "current_action": row["current_action"],
-        "current_url": row["current_url"],
-
-        "plan": _json_loads(row["plan_json"], []),
-        "completed_steps": _json_loads(
-            row["completed_steps_json"],
-            []
-        ),
-
-        "pending_action": _json_loads(
-            row["pending_action_json"],
-            {}
-        ),
-
-        "last_result": _json_loads(
-            row["last_result_json"],
-            {}
-        ),
-
-        "retry_count": row["retry_count"],
-        "max_retries": row["max_retries"],
-
-        "last_error": row["last_error"],
-
-        "created_at": row["created_at"],
-        "started_at": row["started_at"],
-        "paused_at": row["paused_at"],
-        "resumed_at": row["resumed_at"],
-        "completed_at": row["completed_at"],
-        "stopped_at": row["stopped_at"],
-        "updated_at": row["updated_at"],
-
-        "extension_id": row["extension_id"],
-        "browser_name": row["browser_name"],
-
-        "is_deleted": row["is_deleted"]
+    allowed = {
+        "session_id",
+        "campaign_id",
+        "title",
+        "user_command",
+        "status",
+        "current_step",
+        "total_steps",
+        "current_action",
+        "current_url",
+        "plan_json",
+        "completed_steps_json",
+        "pending_action_json",
+        "last_result_json",
+        "retry_count",
+        "max_retries",
+        "last_error",
+        "started_at",
+        "paused_at",
+        "resumed_at",
+        "completed_at",
+        "stopped_at",
+        "extension_id",
+        "browser_name",
+        "is_deleted"
     }
+
+    updates = {}
+
+    for key, value in fields.items():
+
+        if key not in allowed:
+            continue
+
+        if key in {
+            "plan_json",
+            "completed_steps_json",
+            "pending_action_json",
+            "last_result_json"
+        }:
+            value = _json_dumps(value)
+
+        updates[key] = value
+
+    if not updates:
+        return False
+
+    updates["updated_at"] = _utc_now()
+
+    set_clause = ", ".join(
+        f"{key}=?"
+        for key in updates
+    )
+
+    values = list(
+        updates.values()
+    )
+
+    values.append(
+        task_id
+    )
+
+    with _db_lock:
+
+        connection = get_connection()
+
+        try:
+
+            connection.execute(
+                f"""
+                UPDATE automation_tasks
+                SET {set_clause}
+                WHERE id=?
+                """,
+                values
+            )
+
+            connection.commit()
+
+            return True
+
+        except Exception as e:
+
+            connection.rollback()
+
+            _log_db_error(
+                "update_automation_task",
+                e
+            )
+
+            return False
+
+        finally:
+            connection.close()
 
 
 def get_latest_resumable_task():
-    """
-    Find the latest task that can potentially be resumed.
 
-    PAUSED and RESUMING are directly resumable.
-    WAITING is also retained because a browser may have disconnected
-    during a wait operation.
-    """
+    connection = get_connection()
 
     try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT *
-                FROM automation_tasks
-                WHERE is_deleted = 0
-                AND status IN ('PAUSED', 'RESUMING', 'WAITING')
-                ORDER BY updated_at DESC
-                LIMIT 1
-            """).fetchone()
 
-            if row:
-                return _task_row_to_dict(row)
+        row = connection.execute(
+            """
+            SELECT *
+            FROM automation_tasks
+            WHERE is_deleted=0
+              AND status IN
+              (
+                  'PAUSED',
+                  'RESUMING',
+                  'RUNNING',
+                  'WAITING_EXTENSION',
+                  'WAITING_HUMAN'
+              )
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
-            return None
+        return (
+            dict(row)
+            if row
+            else None
+        )
 
-    except Exception as e:
-        _log_db_error("get_latest_resumable_task", e)
-        return None
+    finally:
+        connection.close()
 
 
 def get_running_task():
-    """Return the latest currently running task."""
+
+    connection = get_connection()
 
     try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT *
-                FROM automation_tasks
-                WHERE is_deleted = 0
-                AND status IN ('RUNNING', 'WAITING', 'RESUMING')
-                ORDER BY updated_at DESC
-                LIMIT 1
-            """).fetchone()
 
-            if row:
-                return _task_row_to_dict(row)
+        row = connection.execute(
+            """
+            SELECT *
+            FROM automation_tasks
+            WHERE is_deleted=0
+              AND status='RUNNING'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
-            return None
+        return (
+            dict(row)
+            if row
+            else None
+        )
 
-    except Exception as e:
-        _log_db_error("get_running_task", e)
-        return None
-
-
-def list_automation_tasks(limit=50, include_deleted=False):
-    """Return recent automation tasks."""
-
-    try:
-        with _db_lock:
-
-            if include_deleted:
-                rows = cursor.execute("""
-                    SELECT *
-                    FROM automation_tasks
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                """, (limit,)).fetchall()
-
-            else:
-                rows = cursor.execute("""
-                    SELECT *
-                    FROM automation_tasks
-                    WHERE is_deleted = 0
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                """, (limit,)).fetchall()
-
-            return [
-                _task_row_to_dict(row)
-                for row in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("list_automation_tasks", e)
-        return []
+    finally:
+        connection.close()
 
 
-# ====================================================================
-# TASK STATE / CHECKPOINT UPDATE
-# ====================================================================
-
-def update_automation_task(
-    task_id,
-    status=None,
-    current_step=None,
-    total_steps=None,
-    current_action=None,
-    current_url=None,
-    plan=None,
-    completed_steps=None,
-    pending_action=None,
-    last_result=None,
-    retry_count=None,
-    max_retries=None,
-    last_error=None,
-    extension_id=None,
-    browser_name=None
+def list_automation_tasks(
+    limit: int = 100
 ):
-    """
-    Update only the fields supplied by the caller.
 
-    This allows app.py/main.py to update one small part of the task
-    without destroying other saved information.
-    """
-
-    fields = []
-    values = []
-
-    mapping = [
-        ("status", status),
-        ("current_step", current_step),
-        ("total_steps", total_steps),
-        ("current_action", current_action),
-        ("current_url", current_url),
-        ("retry_count", retry_count),
-        ("max_retries", max_retries),
-        ("last_error", last_error),
-        ("extension_id", extension_id),
-        ("browser_name", browser_name),
-    ]
-
-    for column, value in mapping:
-        if value is not None:
-            fields.append(f"{column} = ?")
-            values.append(value)
-
-    json_mapping = [
-        ("plan_json", plan),
-        ("completed_steps_json", completed_steps),
-        ("pending_action_json", pending_action),
-        ("last_result_json", last_result),
-    ]
-
-    for column, value in json_mapping:
-        if value is not None:
-            fields.append(f"{column} = ?")
-            values.append(_json_dumps(value))
-
-    # Automatically update timestamp.
-    fields.append("updated_at = ?")
-    values.append(_utc_now())
-
-    if not fields:
-        return False
-
-    values.append(task_id)
+    connection = get_connection()
 
     try:
-        with _db_lock:
-            cursor.execute(
-                f"""
-                UPDATE automation_tasks
-                SET {", ".join(fields)}
-                WHERE id = ?
-                """,
-                tuple(values)
-            )
 
-            commit()
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM automation_tasks
+            WHERE is_deleted=0
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
 
-            return cursor.rowcount > 0
+        return [
+            dict(row)
+            for row in rows
+        ]
 
-    except Exception as e:
-        _log_db_error("update_automation_task", e)
-        return False
-
-
-# ====================================================================
-# TASK LIFECYCLE
-# ====================================================================
-
-def start_automation_task(task_id):
-    """Move task into RUNNING state."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'RUNNING',
-                    started_at = COALESCE(started_at, ?),
-                    updated_at = ?
-                WHERE id = ?
-            """, (now, now, task_id))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "TASK_STARTED",
-            "Automation task started"
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("start_automation_task", e)
-        return False
+    finally:
+        connection.close()
 
 
-def pause_automation_task(task_id):
-    """Pause task and preserve current logical state."""
+# ===============================================================
+# 23. AUTOMATION STATUS SHORTCUTS
+# ===============================================================
 
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'PAUSED',
-                    paused_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (now, now, task_id))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "PAUSED",
-            "Automation task paused"
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("pause_automation_task", e)
-        return False
-
-
-def resume_automation_task(task_id):
-    """Move a paused task into RESUMING state."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'RESUMING',
-                    resumed_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (now, now, task_id))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "RESUMED",
-            "Automation task marked for resume"
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("resume_automation_task", e)
-        return False
-
-
-def complete_automation_task(task_id, result=None):
-    """Mark task completed."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'COMPLETED',
-                    last_result_json = ?,
-                    completed_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                _json_dumps(result or {}),
-                now,
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "COMPLETED",
-            "Automation task completed",
-            result or {}
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("complete_automation_task", e)
-        return False
-
-
-def fail_automation_task(task_id, error):
-    """Mark task as failed."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'FAILED',
-                    last_error = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                str(error)[:5000],
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "FAILED",
-            str(error)[:5000]
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("fail_automation_task", e)
-        return False
-
-
-def stop_automation_task(task_id):
-    """Permanently stop/cancel a task."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'CANCELLED',
-                    stopped_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (now, now, task_id))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "CANCELLED",
-            "Automation task cancelled"
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("stop_automation_task", e)
-        return False
-
-
-# ====================================================================
-# AUTOMATION STEP FUNCTIONS
-# ====================================================================
-
-def create_automation_step(
-    task_id,
-    step_number,
-    action,
-    command=None,
-    target=None,
-    selector=None,
-    text_value=None
+def start_automation_task(
+    task_id: str
 ):
-    """Create one automation step."""
 
-    step_id = _new_id("step_")
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                INSERT INTO automation_steps
-                (
-                    id,
-                    task_id,
-                    step_number,
-                    action,
-                    status,
-                    command_json,
-                    target,
-                    selector,
-                    text_value,
-                    started_at,
-                    updated_at
-                )
-                VALUES (
-                    ?, ?, ?, ?, 'PENDING',
-                    ?, ?, ?, ?, NULL, ?
-                )
-            """, (
-                step_id,
-                task_id,
-                step_number,
-                action,
-                _json_dumps(command or {}),
-                target,
-                selector,
-                text_value,
-                now
-            ))
-
-            commit()
-            return step_id
-
-    except Exception as e:
-        _log_db_error("create_automation_step", e)
-        return None
+    return update_automation_task(
+        task_id,
+        status="RUNNING",
+        started_at=_utc_now()
+    )
 
 
-def start_automation_step(task_id, step_number):
-    """Mark one step RUNNING."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_steps
-                SET
-                    status = 'RUNNING',
-                    started_at = COALESCE(started_at, ?),
-                    updated_at = ?
-                WHERE task_id = ?
-                AND step_number = ?
-            """, (
-                now,
-                now,
-                task_id,
-                step_number
-            ))
-
-            commit()
-            return cursor.rowcount > 0
-
-    except Exception as e:
-        _log_db_error("start_automation_step", e)
-        return False
-
-
-def complete_automation_step(
-    task_id,
-    step_number,
-    result=None,
-    url_after=None
+def pause_automation_task(
+    task_id: str,
+    reason: str = ""
 ):
-    """
-    Complete a step and update task checkpoint.
 
-    This is one of the most important functions for resume.
-    """
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-
-            cursor.execute("""
-                UPDATE automation_steps
-                SET
-                    status = 'COMPLETED',
-                    result_json = ?,
-                    url_after = ?,
-                    completed_at = ?,
-                    updated_at = ?
-                WHERE task_id = ?
-                AND step_number = ?
-            """, (
-                _json_dumps(result or {}),
-                url_after,
-                now,
-                now,
-                task_id,
-                step_number
-            ))
-
-            # Add completed step to task JSON.
-            row = cursor.execute("""
-                SELECT completed_steps_json
-                FROM automation_tasks
-                WHERE id = ?
-            """, (task_id,)).fetchone()
-
-            completed = []
-
-            if row:
-                completed = _json_loads(
-                    row["completed_steps_json"],
-                    []
-                )
-
-            if step_number not in completed:
-                completed.append(step_number)
-
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    completed_steps_json = ?,
-                    last_result_json = ?,
-                    current_step = ?,
-                    current_url = COALESCE(?, current_url),
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                _json_dumps(sorted(completed)),
-                _json_dumps(result or {}),
-                step_number,
-                url_after,
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "STEP_COMPLETED",
-            f"Step {step_number} completed",
-            {
-                "step_number": step_number,
-                "result": result or {}
-            },
-            step_number
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("complete_automation_step", e)
-        return False
+    return update_automation_task(
+        task_id,
+        status="PAUSED",
+        paused_at=_utc_now(),
+        last_error=reason
+    )
 
 
-def fail_automation_step(
-    task_id,
-    step_number,
-    error
+def resume_automation_task(
+    task_id: str
 ):
-    """Mark one step as failed."""
 
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_steps
-                SET
-                    status = 'FAILED',
-                    error = ?,
-                    updated_at = ?
-                WHERE task_id = ?
-                AND step_number = ?
-            """, (
-                str(error)[:5000],
-                task_id,
-                step_number
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "STEP_FAILED",
-            str(error)[:5000],
-            {
-                "step_number": step_number
-            },
-            step_number
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error("fail_automation_step", e)
-        return False
+    return update_automation_task(
+        task_id,
+        status="RESUMING",
+        resumed_at=_utc_now()
+    )
 
 
-def increment_step_retry(task_id, step_number):
-    """Increment retry counter for a step."""
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_steps
-                SET
-                    retry_count = retry_count + 1,
-                    updated_at = ?
-                WHERE task_id = ?
-                AND step_number = ?
-            """, (
-                _utc_now(),
-                task_id,
-                step_number
-            ))
-
-            commit()
-
-            row = cursor.execute("""
-                SELECT retry_count
-                FROM automation_steps
-                WHERE task_id = ?
-                AND step_number = ?
-            """, (
-                task_id,
-                step_number
-            )).fetchone()
-
-            return row["retry_count"] if row else 0
-
-    except Exception as e:
-        _log_db_error("increment_step_retry", e)
-        return 0
-
-
-def get_automation_steps(task_id):
-    """Return all steps for a task."""
-
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT *
-                FROM automation_steps
-                WHERE task_id = ?
-                ORDER BY step_number ASC
-            """, (task_id,)).fetchall()
-
-            return [
-                {
-                    "id": r["id"],
-                    "task_id": r["task_id"],
-                    "step_number": r["step_number"],
-                    "action": r["action"],
-                    "status": r["status"],
-                    "command": _json_loads(
-                        r["command_json"],
-                        {}
-                    ),
-                    "result": _json_loads(
-                        r["result_json"],
-                        {}
-                    ),
-                    "target": r["target"],
-                    "selector": r["selector"],
-                    "text_value": r["text_value"],
-                    "url_before": r["url_before"],
-                    "url_after": r["url_after"],
-                    "retry_count": r["retry_count"],
-                    "error": r["error"],
-                    "started_at": r["started_at"],
-                    "completed_at": r["completed_at"],
-                    "updated_at": r["updated_at"]
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_automation_steps", e)
-        return []
-
-
-# ====================================================================
-# 🚀 CHECKPOINT FUNCTIONS
-# ====================================================================
-
-def save_automation_checkpoint(
-    task_id,
-    step_number,
-    action,
-    status,
-    current_url=None,
-    page_title=None,
-    state=None,
-    last_result=None,
-    session_id=None
+def complete_automation_task(
+    task_id: str,
+    result: Optional[Dict[str, Any]] = None
 ):
-    """
-    Save a complete logical checkpoint.
 
-    This is what allows the automation engine to know where it was
-    before Kiwi/browser was closed.
-    """
-
-    checkpoint_id = _new_id("checkpoint_")
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-
-            if session_id is None:
-                row = cursor.execute("""
-                    SELECT session_id
-                    FROM automation_tasks
-                    WHERE id = ?
-                """, (task_id,)).fetchone()
-
-                session_id = row["session_id"] if row else None
-
-            cursor.execute("""
-                INSERT INTO automation_checkpoints
-                (
-                    id,
-                    task_id,
-                    session_id,
-                    step_number,
-                    action,
-                    status,
-                    current_url,
-                    page_title,
-                    state_json,
-                    last_result_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-            """, (
-                checkpoint_id,
-                task_id,
-                session_id,
-                step_number,
-                action,
-                status,
-                current_url,
-                page_title,
-                _json_dumps(state or {}),
-                _json_dumps(last_result or {}),
-                now,
-                now
-            ))
-
-            # Also update main task record.
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    current_step = ?,
-                    current_action = ?,
-                    current_url = COALESCE(?, current_url),
-                    last_result_json = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                step_number,
-                action,
-                current_url,
-                _json_dumps(last_result or {}),
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "CHECKPOINT_SAVED",
-            f"Checkpoint saved at step {step_number}",
-            {
-                "step_number": step_number,
-                "action": action,
-                "status": status
-            },
-            step_number
-        )
-
-        return checkpoint_id
-
-    except Exception as e:
-        _log_db_error("save_automation_checkpoint", e)
-        return None
+    return update_automation_task(
+        task_id,
+        status="COMPLETED",
+        last_result_json=result or {},
+        completed_at=_utc_now()
+    )
 
 
-def get_latest_checkpoint(task_id):
-    """Get the latest checkpoint for a task."""
-
-    try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT *
-                FROM automation_checkpoints
-                WHERE task_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-            """, (task_id,)).fetchone()
-
-            if not row:
-                return None
-
-            return {
-                "id": row["id"],
-                "task_id": row["task_id"],
-                "session_id": row["session_id"],
-                "step_number": row["step_number"],
-                "action": row["action"],
-                "status": row["status"],
-                "current_url": row["current_url"],
-                "page_title": row["page_title"],
-                "state": _json_loads(
-                    row["state_json"],
-                    {}
-                ),
-                "last_result": _json_loads(
-                    row["last_result_json"],
-                    {}
-                ),
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"]
-            }
-
-    except Exception as e:
-        _log_db_error("get_latest_checkpoint", e)
-        return None
-
-
-def get_checkpoint_history(task_id, limit=20):
-    """Return recent checkpoints for debugging/resume history."""
-
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT *
-                FROM automation_checkpoints
-                WHERE task_id = ?
-                ORDER BY updated_at DESC
-                LIMIT ?
-            """, (
-                task_id,
-                limit
-            )).fetchall()
-
-            return [
-                {
-                    "id": r["id"],
-                    "step_number": r["step_number"],
-                    "action": r["action"],
-                    "status": r["status"],
-                    "current_url": r["current_url"],
-                    "page_title": r["page_title"],
-                    "state": _json_loads(
-                        r["state_json"],
-                        {}
-                    ),
-                    "last_result": _json_loads(
-                        r["last_result_json"],
-                        {}
-                    ),
-                    "created_at": r["created_at"],
-                    "updated_at": r["updated_at"]
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_checkpoint_history", e)
-        return []
-
-
-# ====================================================================
-# 🚀 AUTOMATION EVENT LOG
-# ====================================================================
-
-def add_automation_event(
-    task_id,
-    event_type,
-    message="",
-    data=None,
-    step_number=None
+def fail_automation_task(
+    task_id: str,
+    error: str
 ):
-    """Save an automation event."""
 
-    event_id = _new_id("event_")
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                INSERT INTO automation_events
-                (
-                    id,
-                    task_id,
-                    step_number,
-                    event_type,
-                    message,
-                    data_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                event_id,
-                task_id,
-                step_number,
-                event_type,
-                str(message)[:10000],
-                _json_dumps(data or {}),
-                now
-            ))
-
-            commit()
-            return event_id
-
-    except Exception as e:
-        _log_db_error("add_automation_event", e)
-        return None
+    return update_automation_task(
+        task_id,
+        status="FAILED",
+        last_error=error
+    )
 
 
-def get_automation_events(task_id, limit=100):
-    """Return task history/events."""
-
-    try:
-        with _db_lock:
-            rows = cursor.execute("""
-                SELECT *
-                FROM automation_events
-                WHERE task_id = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (
-                task_id,
-                limit
-            )).fetchall()
-
-            return [
-                {
-                    "id": r["id"],
-                    "task_id": r["task_id"],
-                    "step_number": r["step_number"],
-                    "event_type": r["event_type"],
-                    "message": r["message"],
-                    "data": _json_loads(
-                        r["data_json"],
-                        {}
-                    ),
-                    "created_at": r["created_at"]
-                }
-                for r in rows
-            ]
-
-    except Exception as e:
-        _log_db_error("get_automation_events", e)
-        return []
-
-
-# ====================================================================
-# 🚀 AUTOMATION SESSION FUNCTIONS
-# ====================================================================
-
-def create_automation_session(
-    task_id,
-    extension_id=None,
-    browser_name=None,
-    metadata=None,
-    session_id=None
+def stop_automation_task(
+    task_id: str
 ):
-    """Register a Kiwi/extension connection session."""
 
-    session_id = session_id or _new_id("session_")
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                INSERT INTO automation_sessions
-                (
-                    id,
-                    task_id,
-                    extension_id,
-                    browser_name,
-                    status,
-                    started_at,
-                    last_seen_at,
-                    metadata_json
-                )
-                VALUES (
-                    ?, ?, ?, ?, 'CONNECTED',
-                    ?, ?, ?
-                )
-            """, (
-                session_id,
-                task_id,
-                extension_id,
-                browser_name,
-                now,
-                now,
-                _json_dumps(metadata or {})
-            ))
-
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    session_id = ?,
-                    extension_id = ?,
-                    browser_name = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                session_id,
-                extension_id,
-                browser_name,
-                now,
-                task_id
-            ))
-
-            commit()
-            return session_id
-
-    except Exception as e:
-        _log_db_error("create_automation_session", e)
-        return None
+    return update_automation_task(
+        task_id,
+        status="STOPPED",
+        stopped_at=_utc_now()
+    )
 
 
-def heartbeat_automation_session(session_id):
-    """Update last-seen time of an extension session."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_sessions
-                SET
-                    status = 'CONNECTED',
-                    last_seen_at = ?
-                WHERE id = ?
-            """, (
-                now,
-                session_id
-            ))
-
-            commit()
-            return cursor.rowcount > 0
-
-    except Exception as e:
-        _log_db_error(
-            "heartbeat_automation_session",
-            e
-        )
-        return False
-
-
-def disconnect_automation_session(session_id):
-    """Mark extension/browser session disconnected."""
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_sessions
-                SET
-                    status = 'DISCONNECTED',
-                    disconnected_at = ?
-                WHERE id = ?
-            """, (
-                now,
-                session_id
-            ))
-
-            commit()
-            return cursor.rowcount > 0
-
-    except Exception as e:
-        _log_db_error(
-            "disconnect_automation_session",
-            e
-        )
-        return False
-
-
-def get_automation_session(session_id):
-    """Return one session."""
-
-    try:
-        with _db_lock:
-            row = cursor.execute("""
-                SELECT *
-                FROM automation_sessions
-                WHERE id = ?
-            """, (session_id,)).fetchone()
-
-            if not row:
-                return None
-
-            return {
-                "id": row["id"],
-                "task_id": row["task_id"],
-                "extension_id": row["extension_id"],
-                "browser_name": row["browser_name"],
-                "status": row["status"],
-                "started_at": row["started_at"],
-                "last_seen_at": row["last_seen_at"],
-                "disconnected_at": row["disconnected_at"],
-                "metadata": _json_loads(
-                    row["metadata_json"],
-                    {}
-                )
-            }
-
-    except Exception as e:
-        _log_db_error(
-            "get_automation_session",
-            e
-        )
-        return None
-
-
-# ====================================================================
-# 🚀 SMART RESUME SNAPSHOT
-# ====================================================================
-
-def get_resume_snapshot(task_id):
-    """
-    Return everything main.py/app.py needs to resume a task.
-
-    This combines:
-    - task
-    - latest checkpoint
-    - steps
-    - latest events
-    """
-
-    try:
-        task = get_automation_task(task_id)
-
-        if not task:
-            return None
-
-        checkpoint = get_latest_checkpoint(task_id)
-        steps = get_automation_steps(task_id)
-
-        events = get_automation_events(
-            task_id,
-            limit=20
-        )
-
-        return {
-            "task": task,
-            "checkpoint": checkpoint,
-            "steps": steps,
-            "events": events
-        }
-
-    except Exception as e:
-        _log_db_error("get_resume_snapshot", e)
-        return None
-
-
-# ====================================================================
-# 🚀 MARK BROWSER DISCONNECT / RECONNECT
-# ====================================================================
-
-def mark_task_browser_disconnected(
-    task_id,
-    current_url=None,
-    reason="browser_disconnected"
+def increment_task_retry(
+    task_id: str
 ):
-    """
-    Browser/Kiwi disappeared.
 
-    We do NOT cancel the task.
-    We preserve its state as PAUSED.
-    """
+    task = get_automation_task(
+        task_id
+    )
 
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'PAUSED',
-                    paused_at = ?,
-                    current_url = COALESCE(?, current_url),
-                    updated_at = ?
-                WHERE id = ?
-                AND status NOT IN ('COMPLETED', 'CANCELLED')
-            """, (
-                now,
-                current_url,
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "BROWSER_DISCONNECTED",
-            reason,
-            {
-                "current_url": current_url
-            }
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error(
-            "mark_task_browser_disconnected",
-            e
-        )
+    if not task:
         return False
 
+    retry_count = int(
+        task.get("retry_count") or 0
+    ) + 1
 
-def mark_task_browser_reconnected(task_id):
-    """
-    Browser came back.
-
-    Task goes to RESUMING, not directly RUNNING.
-    main.py will perform the actual resume logic.
-    """
-
-    now = _utc_now()
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    status = 'RESUMING',
-                    resumed_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-                AND status IN ('PAUSED', 'RESUMING', 'WAITING')
-            """, (
-                now,
-                now,
-                task_id
-            ))
-
-            commit()
-
-        add_automation_event(
-            task_id,
-            "BROWSER_RECONNECTED",
-            "Browser/extension reconnected; task ready for resume"
-        )
-
-        return True
-
-    except Exception as e:
-        _log_db_error(
-            "mark_task_browser_reconnected",
-            e
-        )
-        return False
+    return update_automation_task(
+        task_id,
+        retry_count=retry_count
+    )
 
 
-# ====================================================================
-# 🚀 RETRY MANAGEMENT
-# ====================================================================
+# ===============================================================
+# 24. STARTUP
+# ===============================================================
 
-def increment_task_retry(task_id):
-    """
-    Increment task-level retry count.
-    """
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    retry_count = retry_count + 1,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                _utc_now(),
-                task_id
-            ))
-
-            commit()
-
-            row = cursor.execute("""
-                SELECT
-                    retry_count,
-                    max_retries
-                FROM automation_tasks
-                WHERE id = ?
-            """, (task_id,)).fetchone()
-
-            if not row:
-                return {
-                    "retry_count": 0,
-                    "max_retries": 0,
-                    "can_retry": False
-                }
-
-            retry_count = row["retry_count"]
-            max_retries = row["max_retries"]
-
-            return {
-                "retry_count": retry_count,
-                "max_retries": max_retries,
-                "can_retry": retry_count < max_retries
-            }
-
-    except Exception as e:
-        _log_db_error(
-            "increment_task_retry",
-            e
-        )
-
-        return {
-            "retry_count": 0,
-            "max_retries": 0,
-            "can_retry": False
-        }
-
-
-# ====================================================================
-# 🚀 SOFT DELETE AUTOMATION TASK
-# ====================================================================
-
-def delete_automation_task(task_id):
-    """
-    Soft-delete a task.
-
-    Data remains available for debugging/history.
-    """
-
-    try:
-        with _db_lock:
-            cursor.execute("""
-                UPDATE automation_tasks
-                SET
-                    is_deleted = 1,
-                    updated_at = ?
-                WHERE id = ?
-            """, (
-                _utc_now(),
-                task_id
-            ))
-
-            commit()
-            return cursor.rowcount > 0
-
-    except Exception as e:
-        _log_db_error(
-            "delete_automation_task",
-            e
-        )
-        return False
-
-
-# ====================================================================
-# 🚀 DATABASE BACKUP
-# ====================================================================
-
-def backup_database(destination_dir=None):
-    """
-    Create a timestamped physical backup of ai_system.db.
-
-    This is intentionally NOT executed on every database operation.
-
-    Call it manually before major deployments or from a maintenance
-    routine if required.
-
-    Returns:
-        backup file path
-        or None
-    """
-
-    destination_dir = destination_dir or DB_BACKUP_DIR
-
-    try:
-        with _db_lock:
-
-            if not os.path.exists(DB_PATH):
-                return None
-
-            os.makedirs(
-                destination_dir,
-                exist_ok=True
-            )
-
-            timestamp = datetime.now(
-                timezone.utc
-            ).strftime("%Y%m%d_%H%M%S")
-
-            filename = (
-                f"ai_system_backup_{timestamp}.db"
-            )
-
-            destination = os.path.join(
-                destination_dir,
-                filename
-            )
-
-            # SQLite-safe backup using SQLite's backup API.
-            backup_conn = sqlite3.connect(
-                destination
-            )
-
-            try:
-                conn.backup(backup_conn)
-            finally:
-                backup_conn.close()
-
-            print(
-                f"🛡️ Database backup created: {destination}"
-            )
-
-            return destination
-
-    except Exception as e:
-        _log_db_error(
-            "backup_database",
-            e
-        )
-        return None
-
-
-# ====================================================================
-# 🚀 DATABASE HEALTH
-# ====================================================================
-
-def database_health():
-    """Simple diagnostic information."""
-
-    try:
-        with _db_lock:
-
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-
-            campaign_count = cursor.execute(
-                "SELECT COUNT(*) FROM campaigns"
-            ).fetchone()[0]
-
-            message_count = cursor.execute(
-                "SELECT COUNT(*) FROM messages"
-            ).fetchone()[0]
-
-            task_count = cursor.execute(
-                "SELECT COUNT(*) FROM automation_tasks"
-            ).fetchone()[0]
-
-            checkpoint_count = cursor.execute(
-                "SELECT COUNT(*) FROM automation_checkpoints"
-            ).fetchone()[0]
-
-            return {
-                "ok": True,
-                "database": DB_PATH,
-                "campaigns": campaign_count,
-                "messages": message_count,
-                "automation_tasks": task_count,
-                "checkpoints": checkpoint_count,
-                "timestamp": _utc_now()
-            }
-
-    except Exception as e:
-        _log_db_error(
-            "database_health",
-            e
-        )
-
-        return {
-            "ok": False,
-            "database": DB_PATH,
-            "error": str(e)
-        }
-
-
-# ====================================================================
-# INIT
-# ====================================================================
-
+# Initialize automatically when imported.
 init_db()
 
-print("✅ Database ready!")
-print("🧠 Memory layer ready!")
-print("🤖 Automation task memory ready!")
-print("💾 Checkpoint / Resume system ready!")
-print("🔁 Retry / Session tracking ready!")
+
+# ===============================================================
+# END OF db.py
+# ===============================================================
