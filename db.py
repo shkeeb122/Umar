@@ -49,6 +49,7 @@ import time
 import shutil
 import sqlite3
 import threading
+
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -57,7 +58,10 @@ from typing import Any, Dict, List, Optional
 # 1. CONFIGURATION
 # ===============================================================
 
-DB_PATH = os.environ.get("AI_DB_PATH", "ai_system.db")
+DB_PATH = os.environ.get(
+    "AI_DB_PATH",
+    "ai_system.db"
+)
 
 DB_BACKUP_DIR = os.environ.get(
     "DB_BACKUP_DIR",
@@ -65,11 +69,17 @@ DB_BACKUP_DIR = os.environ.get(
 )
 
 DB_TIMEOUT = int(
-    os.environ.get("DB_TIMEOUT", "30")
+    os.environ.get(
+        "DB_TIMEOUT",
+        "30"
+    )
 )
 
 DB_BUSY_TIMEOUT = int(
-    os.environ.get("DB_BUSY_TIMEOUT", "30000")
+    os.environ.get(
+        "DB_BUSY_TIMEOUT",
+        "30000"
+    )
 )
 
 DB_VERSION = 10
@@ -90,39 +100,79 @@ def _utc_now() -> str:
     """
     Return timezone-aware UTC timestamp.
     """
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
 
 
 def _new_id(prefix: str = "") -> str:
-    value = str(uuid.uuid4())
-    return f"{prefix}{value}" if prefix else value
+    """
+    Generate a unique UUID-based ID.
+    """
+    value = str(
+        uuid.uuid4()
+    )
+
+    return (
+        f"{prefix}{value}"
+        if prefix
+        else value
+    )
 
 
 def _json_dumps(value: Any) -> str:
+    """
+    Safely convert Python data to JSON.
+    """
     try:
+
         return json.dumps(
             value,
             ensure_ascii=False,
             default=str
         )
+
     except Exception:
+
         return "{}"
 
 
-def _json_loads(value: Any, default=None):
+def _json_loads(
+    value: Any,
+    default=None
+):
+    """
+    Safely convert JSON back to Python data.
+    """
+
     if value is None:
         return default
 
-    if isinstance(value, (dict, list)):
+    if isinstance(
+        value,
+        (dict, list)
+    ):
         return value
 
     try:
-        return json.loads(value)
+
+        return json.loads(
+            value
+        )
+
     except Exception:
+
         return default
 
 
-def _log_db_error(where: str, error: Exception):
+def _log_db_error(
+    where: str,
+    error: Exception
+):
+    """
+    Central database error logger.
+    """
+
     print(
         f"❌ DATABASE ERROR [{where}]: "
         f"{type(error).__name__}: {error}"
@@ -150,25 +200,43 @@ def get_connection() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
 
     try:
-        connection.execute("PRAGMA journal_mode=WAL")
+
+        connection.execute(
+            "PRAGMA journal_mode=WAL"
+        )
+
     except Exception:
+
         pass
 
     try:
+
         connection.execute(
             f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT}"
         )
+
     except Exception:
+
         pass
 
     try:
-        connection.execute("PRAGMA foreign_keys=ON")
+
+        connection.execute(
+            "PRAGMA foreign_keys=ON"
+        )
+
     except Exception:
+
         pass
 
     try:
-        connection.execute("PRAGMA synchronous=NORMAL")
+
+        connection.execute(
+            "PRAGMA synchronous=NORMAL"
+        )
+
     except Exception:
+
         pass
 
     return connection
@@ -190,8 +258,14 @@ def get_cursor():
 
     Returns a fresh cursor instead of relying on a permanently
     open global database connection.
+
+    NOTE:
+    New code should use get_connection() and close the connection
+    explicitly.
     """
+
     connection = get_connection()
+
     return connection.cursor()
 
 
@@ -201,20 +275,32 @@ def commit():
 
     New code should commit on its own connection.
     """
+
     global conn
 
     if conn is not None:
+
         try:
+
             conn.commit()
+
         except Exception as e:
-            _log_db_error("commit", e)
+
+            _log_db_error(
+                "commit",
+                e
+            )
 
 
 # ===============================================================
 # 6. SCHEMA HELPERS
 # ===============================================================
 
-def _table_exists(connection, table_name: str) -> bool:
+def _table_exists(
+    connection,
+    table_name: str
+) -> bool:
+
     row = connection.execute(
         """
         SELECT name
@@ -228,7 +314,10 @@ def _table_exists(connection, table_name: str) -> bool:
     return row is not None
 
 
-def _get_columns(connection, table_name: str) -> Dict[str, Dict[str, Any]]:
+def _get_columns(
+    connection,
+    table_name: str
+) -> Dict[str, Dict[str, Any]]:
     """
     Return:
         {
@@ -242,7 +331,10 @@ def _get_columns(connection, table_name: str) -> Dict[str, Dict[str, Any]]:
         }
     """
 
-    if not _table_exists(connection, table_name):
+    if not _table_exists(
+        connection,
+        table_name
+    ):
         return {}
 
     rows = connection.execute(
@@ -252,7 +344,10 @@ def _get_columns(connection, table_name: str) -> Dict[str, Dict[str, Any]]:
     result = {}
 
     for row in rows:
-        result[row["name"]] = dict(row)
+
+        result[
+            row["name"]
+        ] = dict(row)
 
     return result
 
@@ -263,6 +358,7 @@ def _add_column_if_missing(
     column_name: str,
     column_definition: str
 ):
+
     columns = _get_columns(
         connection,
         table_name
@@ -291,7 +387,9 @@ def backup_database(
 
     with _db_lock:
 
-        if not os.path.exists(DB_PATH):
+        if not os.path.exists(
+            DB_PATH
+        ):
             return None
 
         try:
@@ -303,10 +401,14 @@ def backup_database(
 
             timestamp = datetime.now(
                 timezone.utc
-            ).strftime("%Y%m%d_%H%M%S")
+            ).strftime(
+                "%Y%m%d_%H%M%S"
+            )
 
             backup_name = (
-                f"ai_system_{timestamp}_{reason}.db"
+                f"ai_system_"
+                f"{timestamp}_"
+                f"{reason}.db"
             )
 
             backup_path = os.path.join(
@@ -320,7 +422,7 @@ def backup_database(
             )
 
             print(
-                f"✅ Database backup created: "
+                "✅ Database backup created: "
                 f"{backup_path}"
             )
 
@@ -348,19 +450,32 @@ def init_db():
     Existing DB is never deleted.
     """
 
-    global conn, cursor
+    global conn
+    global cursor
 
     with _db_lock:
+
+        connection = None
 
         try:
 
             # ---------------------------------------------------
-            # Backup before schema work when DB already exists.
+            # Detect existing database.
             # ---------------------------------------------------
 
             database_exists = os.path.exists(
                 DB_PATH
             )
+
+            # ---------------------------------------------------
+            # Backup an existing database before schema work.
+            # ---------------------------------------------------
+
+            if database_exists:
+
+                backup_database(
+                    reason="pre_migration"
+                )
 
             connection = get_connection()
 
@@ -741,7 +856,10 @@ def init_db():
                 """
                 CREATE INDEX IF NOT EXISTS
                 idx_steps_session_sequence
-                ON automation_steps(session_id, sequence)
+                ON automation_steps(
+                    session_id,
+                    sequence
+                )
                 """,
 
                 """
@@ -759,7 +877,11 @@ def init_db():
                 """
                 CREATE INDEX IF NOT EXISTS
                 idx_bridge_commands_status
-                ON bridge_commands(status, priority, created_at)
+                ON bridge_commands(
+                    status,
+                    priority,
+                    created_at
+                )
                 """,
 
                 """
@@ -782,9 +904,15 @@ def init_db():
             ]
 
             for statement in indexes:
+
                 try:
-                    connection.execute(statement)
+
+                    connection.execute(
+                        statement
+                    )
+
                 except Exception as e:
+
                     _log_db_error(
                         "index_creation",
                         e
@@ -805,11 +933,17 @@ def init_db():
             connection.execute(
                 """
                 INSERT INTO schema_meta
-                (key, value, updated_at)
-
+                (
+                    key,
+                    value,
+                    updated_at
+                )
                 VALUES
-                ('db_version', ?, ?)
-
+                (
+                    'db_version',
+                    ?,
+                    ?
+                )
                 ON CONFLICT(key)
                 DO UPDATE SET
                     value=excluded.value,
@@ -823,18 +957,28 @@ def init_db():
 
             connection.commit()
 
+            # ---------------------------------------------------
             # Compatibility globals
+            # ---------------------------------------------------
+
             conn = connection
             cursor = connection.cursor()
 
             print(
-                f"✅ Database initialized successfully "
+                "✅ Database initialized successfully "
                 f"(schema v{DB_VERSION})"
             )
 
             return True
 
         except Exception as e:
+
+            if connection is not None:
+
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
 
             _log_db_error(
                 "init_db",
@@ -848,7 +992,9 @@ def init_db():
 # 9. SAFE MIGRATION ENGINE
 # ===============================================================
 
-def _run_safe_migrations(connection):
+def _run_safe_migrations(
+    connection
+):
     """
     Add missing compatible columns without deleting data.
 
@@ -860,24 +1006,39 @@ def _run_safe_migrations(connection):
     # -----------------------------------------------------------
 
     campaign_columns = {
-        "description": "TEXT DEFAULT ''",
-        "message_count": "INTEGER DEFAULT 0",
-        "question_count": "INTEGER DEFAULT 0",
-        "created_at": "TEXT",
-        "updated_at": "TEXT",
-        "is_deleted": "INTEGER DEFAULT 0"
+
+        "description":
+            "TEXT DEFAULT ''",
+
+        "message_count":
+            "INTEGER DEFAULT 0",
+
+        "question_count":
+            "INTEGER DEFAULT 0",
+
+        "created_at":
+            "TEXT",
+
+        "updated_at":
+            "TEXT",
+
+        "is_deleted":
+            "INTEGER DEFAULT 0"
     }
 
     for name, definition in campaign_columns.items():
 
         try:
+
             _add_column_if_missing(
                 connection,
                 "campaigns",
                 name,
                 definition
             )
+
         except Exception as e:
+
             _log_db_error(
                 f"migration campaigns.{name}",
                 e
@@ -894,21 +1055,35 @@ def _run_safe_migrations(connection):
         "title": "TEXT",
         "user_command": "TEXT",
 
-        "status": "TEXT DEFAULT 'PENDING'",
+        "status":
+            "TEXT DEFAULT 'PENDING'",
 
-        "current_step": "INTEGER DEFAULT 0",
-        "total_steps": "INTEGER DEFAULT 0",
+        "current_step":
+            "INTEGER DEFAULT 0",
+
+        "total_steps":
+            "INTEGER DEFAULT 0",
 
         "current_action": "TEXT",
         "current_url": "TEXT",
 
-        "plan_json": "TEXT DEFAULT '{}'",
-        "completed_steps_json": "TEXT DEFAULT '[]'",
-        "pending_action_json": "TEXT DEFAULT '{}'",
-        "last_result_json": "TEXT DEFAULT '{}'",
+        "plan_json":
+            "TEXT DEFAULT '{}'",
 
-        "retry_count": "INTEGER DEFAULT 0",
-        "max_retries": "INTEGER DEFAULT 3",
+        "completed_steps_json":
+            "TEXT DEFAULT '[]'",
+
+        "pending_action_json":
+            "TEXT DEFAULT '{}'",
+
+        "last_result_json":
+            "TEXT DEFAULT '{}'",
+
+        "retry_count":
+            "INTEGER DEFAULT 0",
+
+        "max_retries":
+            "INTEGER DEFAULT 3",
 
         "last_error": "TEXT",
 
@@ -923,19 +1098,23 @@ def _run_safe_migrations(connection):
         "extension_id": "TEXT",
         "browser_name": "TEXT",
 
-        "is_deleted": "INTEGER DEFAULT 0"
+        "is_deleted":
+            "INTEGER DEFAULT 0"
     }
 
     for name, definition in task_columns.items():
 
         try:
+
             _add_column_if_missing(
                 connection,
                 "automation_tasks",
                 name,
                 definition
             )
+
         except Exception as e:
+
             _log_db_error(
                 f"migration automation_tasks.{name}",
                 e
@@ -948,21 +1127,49 @@ def _run_safe_migrations(connection):
     session_columns = {
 
         "session_id": "TEXT",
-        "status": "TEXT DEFAULT 'PENDING'",
-        "title": "TEXT DEFAULT ''",
-        "user_command": "TEXT DEFAULT ''",
-        "plan_json": "TEXT DEFAULT '{}'",
-        "current_step": "INTEGER DEFAULT 0",
-        "current_action": "TEXT DEFAULT ''",
-        "current_url": "TEXT DEFAULT ''",
-        "last_result_json": "TEXT DEFAULT '{}'",
-        "checkpoint_json": "TEXT DEFAULT '{}'",
+
+        "status":
+            "TEXT DEFAULT 'PENDING'",
+
+        "title":
+            "TEXT DEFAULT ''",
+
+        "user_command":
+            "TEXT DEFAULT ''",
+
+        "plan_json":
+            "TEXT DEFAULT '{}'",
+
+        "current_step":
+            "INTEGER DEFAULT 0",
+
+        "current_action":
+            "TEXT DEFAULT ''",
+
+        "current_url":
+            "TEXT DEFAULT ''",
+
+        "last_result_json":
+            "TEXT DEFAULT '{}'",
+
+        "checkpoint_json":
+            "TEXT DEFAULT '{}'",
+
         "last_error": "TEXT",
-        "retry_count": "INTEGER DEFAULT 0",
-        "max_retries": "INTEGER DEFAULT 3",
+
+        "retry_count":
+            "INTEGER DEFAULT 0",
+
+        "max_retries":
+            "INTEGER DEFAULT 3",
+
         "pause_reason": "TEXT",
+
         "extension_id": "TEXT",
-        "browser_name": "TEXT DEFAULT 'Kiwi'",
+
+        "browser_name":
+            "TEXT DEFAULT 'Kiwi'",
+
         "created_at": "TEXT",
         "updated_at": "TEXT",
         "completed_at": "TEXT"
@@ -971,13 +1178,16 @@ def _run_safe_migrations(connection):
     for name, definition in session_columns.items():
 
         try:
+
             _add_column_if_missing(
                 connection,
                 "automation_sessions",
                 name,
                 definition
             )
+
         except Exception as e:
+
             _log_db_error(
                 f"migration automation_sessions.{name}",
                 e
@@ -990,16 +1200,34 @@ def _run_safe_migrations(connection):
     step_columns = {
 
         "step_id": "TEXT",
+
         "session_id": "TEXT",
-        "sequence": "INTEGER DEFAULT 0",
+
+        "sequence":
+            "INTEGER DEFAULT 0",
+
         "action": "TEXT",
-        "target": "TEXT DEFAULT ''",
-        "input_json": "TEXT DEFAULT '{}'",
-        "status": "TEXT DEFAULT 'PENDING'",
-        "attempt_count": "INTEGER DEFAULT 0",
-        "max_attempts": "INTEGER DEFAULT 3",
-        "result_json": "TEXT DEFAULT '{}'",
+
+        "target":
+            "TEXT DEFAULT ''",
+
+        "input_json":
+            "TEXT DEFAULT '{}'",
+
+        "status":
+            "TEXT DEFAULT 'PENDING'",
+
+        "attempt_count":
+            "INTEGER DEFAULT 0",
+
+        "max_attempts":
+            "INTEGER DEFAULT 3",
+
+        "result_json":
+            "TEXT DEFAULT '{}'",
+
         "error": "TEXT",
+
         "started_at": "TEXT",
         "completed_at": "TEXT"
     }
@@ -1007,13 +1235,16 @@ def _run_safe_migrations(connection):
     for name, definition in step_columns.items():
 
         try:
+
             _add_column_if_missing(
                 connection,
                 "automation_steps",
                 name,
                 definition
             )
+
         except Exception as e:
+
             _log_db_error(
                 f"migration automation_steps.{name}",
                 e
@@ -1026,24 +1257,37 @@ def _run_safe_migrations(connection):
     checkpoint_columns = {
 
         "checkpoint_id": "TEXT",
+
         "session_id": "TEXT",
-        "current_step": "INTEGER DEFAULT 0",
-        "current_action": "TEXT DEFAULT ''",
-        "current_url": "TEXT DEFAULT ''",
-        "snapshot_json": "TEXT DEFAULT '{}'",
+
+        "current_step":
+            "INTEGER DEFAULT 0",
+
+        "current_action":
+            "TEXT DEFAULT ''",
+
+        "current_url":
+            "TEXT DEFAULT ''",
+
+        "snapshot_json":
+            "TEXT DEFAULT '{}'",
+
         "created_at": "TEXT"
     }
 
     for name, definition in checkpoint_columns.items():
 
         try:
+
             _add_column_if_missing(
                 connection,
                 "automation_checkpoints",
                 name,
                 definition
             )
+
         except Exception as e:
+
             _log_db_error(
                 f"migration automation_checkpoints.{name}",
                 e
@@ -1059,7 +1303,10 @@ def create_campaign(
     description: str = ""
 ) -> Optional[str]:
 
-    campaign_id = _new_id("camp_")
+    campaign_id = _new_id(
+        "camp_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -1111,7 +1358,9 @@ def create_campaign(
             connection.close()
 
 
-def get_campaign(campaign_id: str):
+def get_campaign(
+    campaign_id: str
+):
 
     connection = get_connection()
 
@@ -1126,7 +1375,11 @@ def get_campaign(campaign_id: str):
             (campaign_id,)
         ).fetchone()
 
-        return dict(row) if row else None
+        return (
+            dict(row)
+            if row
+            else None
+        )
 
     finally:
         connection.close()
@@ -1184,7 +1437,8 @@ def rename_campaign(
             connection.execute(
                 """
                 UPDATE campaigns
-                SET name=?,
+                SET
+                    name=?,
                     updated_at=?
                 WHERE id=?
                 """,
@@ -1227,7 +1481,8 @@ def delete_campaign(
             connection.execute(
                 """
                 UPDATE campaigns
-                SET is_deleted=1,
+                SET
+                    is_deleted=1,
                     updated_at=?
                 WHERE id=?
                 """,
@@ -1244,6 +1499,11 @@ def delete_campaign(
         except Exception as e:
 
             connection.rollback()
+
+            _log_db_error(
+                "delete_campaign",
+                e
+            )
 
             return False
 
@@ -1264,7 +1524,8 @@ def restore_campaign(
             connection.execute(
                 """
                 UPDATE campaigns
-                SET is_deleted=0,
+                SET
+                    is_deleted=0,
                     updated_at=?
                 WHERE id=?
                 """,
@@ -1282,6 +1543,11 @@ def restore_campaign(
 
             connection.rollback()
 
+            _log_db_error(
+                "restore_campaign",
+                e
+            )
+
             return False
 
         finally:
@@ -1297,8 +1563,16 @@ def save_message(
     role: str,
     content: str
 ):
+    """
+    Save one chat message.
 
-    message_id = _new_id("msg_")
+    Existing database data is preserved.
+    """
+
+    message_id = _new_id(
+        "msg_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -1351,6 +1625,37 @@ def get_messages(
     campaign_id: str,
     limit: int = 100
 ):
+    """
+    Return the newest `limit` messages in chronological order.
+
+    This is intentionally implemented as:
+
+        newest -> LIMIT
+        then reverse
+
+    so the AI receives:
+
+        oldest -> newest
+
+    without accidentally returning old messages.
+    """
+
+    if not campaign_id:
+        return []
+
+    try:
+
+        limit = max(
+            1,
+            int(limit)
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        limit = 100
 
     connection = get_connection()
 
@@ -1361,7 +1666,9 @@ def get_messages(
             SELECT *
             FROM messages
             WHERE campaign_id=?
-            ORDER BY created_at ASC
+            ORDER BY
+                created_at DESC,
+                id DESC
             LIMIT ?
             """,
             (
@@ -1370,10 +1677,24 @@ def get_messages(
             )
         ).fetchall()
 
-        return [
+        messages = [
             dict(row)
             for row in rows
         ]
+
+        # Conversation history must be chronological.
+        messages.reverse()
+
+        return messages
+
+    except Exception as e:
+
+        _log_db_error(
+            "get_messages",
+            e
+        )
+
+        return []
 
     finally:
         connection.close()
@@ -1383,16 +1704,27 @@ def get_recent_messages(
     campaign_id: str,
     limit: int = 20
 ):
+    """
+    Return the latest messages.
+
+    Existing API preserved.
+    """
 
     return get_messages(
         campaign_id,
         limit
-    )[-limit:]
+    )
 
 
 def count_messages(
     campaign_id: str
 ):
+    """
+    Count all messages belonging to a campaign.
+    """
+
+    if not campaign_id:
+        return 0
 
     connection = get_connection()
 
@@ -1407,7 +1739,150 @@ def count_messages(
             (campaign_id,)
         ).fetchone()
 
-        return int(row["count"])
+        return int(
+            row["count"]
+        )
+
+    except Exception as e:
+
+        _log_db_error(
+            "count_messages",
+            e
+        )
+
+        return 0
+
+    finally:
+        connection.close()
+
+
+# ===============================================================
+# 11.1 AI SERVICE COMPATIBILITY
+# ===============================================================
+
+def get_recent_history(
+    campaign_id: str,
+    limit: int = 20
+):
+    """
+    Compatibility API required by ai_service.py.
+
+    Returns the latest conversation messages
+    in chronological order.
+    """
+
+    return get_messages(
+        campaign_id,
+        limit
+    )
+
+
+def get_all_history(
+    campaign_id: str,
+    limit: int = 1000
+):
+    """
+    Compatibility API required by ai_service.py.
+
+    Returns campaign history in chronological order.
+    """
+
+    if not campaign_id:
+        return []
+
+    try:
+
+        limit = max(
+            1,
+            int(limit)
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        limit = 1000
+
+    connection = get_connection()
+
+    try:
+
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM messages
+            WHERE campaign_id=?
+            ORDER BY
+                created_at ASC,
+                id ASC
+            LIMIT ?
+            """,
+            (
+                campaign_id,
+                limit
+            )
+        ).fetchall()
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    except Exception as e:
+
+        _log_db_error(
+            "get_all_history",
+            e
+        )
+
+        return []
+
+    finally:
+        connection.close()
+
+
+def count_questions(
+    campaign_id: str
+):
+    """
+    Compatibility API required by ai_service.py.
+
+    Counts user messages.
+
+    The current application uses role='user'
+    for user requests/questions.
+    """
+
+    if not campaign_id:
+        return 0
+
+    connection = get_connection()
+
+    try:
+
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM messages
+            WHERE campaign_id=?
+              AND LOWER(role)='user'
+            """,
+            (campaign_id,)
+        ).fetchone()
+
+        return int(
+            row["count"]
+        )
+
+    except Exception as e:
+
+        _log_db_error(
+            "count_questions",
+            e
+        )
+
+        return 0
 
     finally:
         connection.close()
@@ -1424,7 +1899,10 @@ def save_blog(
     status: str = "draft"
 ):
 
-    post_id = _new_id("post_")
+    post_id = _new_id(
+        "post_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -1494,7 +1972,11 @@ def get_blog(
             (slug,)
         ).fetchone()
 
-        return dict(row) if row else None
+        return (
+            dict(row)
+            if row
+            else None
+        )
 
     finally:
         connection.close()
@@ -1536,7 +2018,10 @@ def create_automation_session(
     max_retries: int = 3
 ):
 
-    session_id = _new_id("session_")
+    session_id = _new_id(
+        "session_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -1636,7 +2121,9 @@ def get_automation_session(
         connection.close()
 
 
-def _session_row_to_dict(row):
+def _session_row_to_dict(
+    row
+):
 
     data = dict(row)
 
@@ -1647,6 +2134,7 @@ def _session_row_to_dict(row):
     ]:
 
         if field in data:
+
             data[field] = _json_loads(
                 data[field],
                 {}
@@ -1694,14 +2182,19 @@ def update_automation_session(
             "last_result_json",
             "checkpoint_json"
         }:
-            value = _json_dumps(value)
+
+            value = _json_dumps(
+                value
+            )
 
         updates[key] = value
 
     if not updates:
         return False
 
-    updates["updated_at"] = _utc_now()
+    updates[
+        "updated_at"
+    ] = _utc_now()
 
     set_clause = ", ".join(
         f"{key}=?"
@@ -1759,11 +2252,15 @@ def create_automation_step(
     sequence: int,
     action: str,
     target: str = "",
-    input_data: Optional[Dict[str, Any]] = None,
+    input_data: Optional[
+        Dict[str, Any]
+    ] = None,
     max_attempts: int = 3
 ):
 
-    step_id = _new_id("step_")
+    step_id = _new_id(
+        "step_"
+    )
 
     with _db_lock:
 
@@ -1844,17 +2341,27 @@ def get_automation_steps(
 
             item = dict(row)
 
-            item["input_json"] = _json_loads(
-                item.get("input_json"),
+            item[
+                "input_json"
+            ] = _json_loads(
+                item.get(
+                    "input_json"
+                ),
                 {}
             )
 
-            item["result_json"] = _json_loads(
-                item.get("result_json"),
+            item[
+                "result_json"
+            ] = _json_loads(
+                item.get(
+                    "result_json"
+                ),
                 {}
             )
 
-            result.append(item)
+            result.append(
+                item
+            )
 
         return result
 
@@ -1889,7 +2396,10 @@ def update_automation_step(
             "result_json",
             "input_json"
         }:
-            value = _json_dumps(value)
+
+            value = _json_dumps(
+                value
+            )
 
         updates[key] = value
 
@@ -1932,6 +2442,11 @@ def update_automation_step(
 
             connection.rollback()
 
+            _log_db_error(
+                "update_automation_step",
+                e
+            )
+
             return False
 
         finally:
@@ -1947,7 +2462,9 @@ def save_automation_checkpoint(
     current_step: int = 0,
     current_action: str = "",
     current_url: str = "",
-    snapshot: Optional[Dict[str, Any]] = None
+    snapshot: Optional[
+        Dict[str, Any]
+    ] = None
 ):
 
     checkpoint_id = _new_id(
@@ -2055,8 +2572,12 @@ def get_latest_automation_checkpoint(
 
         result = dict(row)
 
-        result["snapshot_json"] = _json_loads(
-            result.get("snapshot_json"),
+        result[
+            "snapshot_json"
+        ] = _json_loads(
+            result.get(
+                "snapshot_json"
+            ),
             {}
         )
 
@@ -2095,12 +2616,18 @@ def get_checkpoint_history(
 
             item = dict(row)
 
-            item["snapshot_json"] = _json_loads(
-                item.get("snapshot_json"),
+            item[
+                "snapshot_json"
+            ] = _json_loads(
+                item.get(
+                    "snapshot_json"
+                ),
                 {}
             )
 
-            result.append(item)
+            result.append(
+                item
+            )
 
         return result
 
@@ -2116,12 +2643,16 @@ def add_automation_event(
     session_id: str,
     event_type: str,
     message: str = "",
-    data: Optional[Dict[str, Any]] = None,
+    data: Optional[
+        Dict[str, Any]
+    ] = None,
     step_number: int = 0,
     task_id: Optional[str] = None
 ):
 
-    event_id = _new_id("event_")
+    event_id = _new_id(
+        "event_"
+    )
 
     with _db_lock:
 
@@ -2166,6 +2697,11 @@ def add_automation_event(
 
             connection.rollback()
 
+            _log_db_error(
+                "add_automation_event",
+                e
+            )
+
             return None
 
         finally:
@@ -2201,12 +2737,18 @@ def get_automation_events(
 
             item = dict(row)
 
-            item["data_json"] = _json_loads(
-                item.get("data_json"),
+            item[
+                "data_json"
+            ] = _json_loads(
+                item.get(
+                    "data_json"
+                ),
                 {}
             )
 
-            result.append(item)
+            result.append(
+                item
+            )
 
         return result
 
@@ -2220,14 +2762,19 @@ def get_automation_events(
 
 def create_bridge_command(
     action: str,
-    payload: Optional[Dict[str, Any]] = None,
+    payload: Optional[
+        Dict[str, Any]
+    ] = None,
     session_id: Optional[str] = None,
     priority: int = 0,
     max_attempts: int = 3,
     available_at: Optional[str] = None
 ):
 
-    command_id = _new_id("cmd_")
+    command_id = _new_id(
+        "cmd_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -2305,7 +2852,7 @@ def claim_next_bridge_command(
             now = _utc_now()
 
             # ---------------------------------------------------
-            # First recover commands locked for too long.
+            # Recover commands locked for too long.
             # ---------------------------------------------------
 
             connection.execute(
@@ -2317,7 +2864,8 @@ def claim_next_bridge_command(
                     updated_at=?
                 WHERE status='processing'
                   AND locked_at IS NOT NULL
-                  AND locked_at < datetime(?, '-5 minutes')
+                  AND locked_at <
+                      datetime(?, '-5 minutes')
                 """,
                 (
                     now,
@@ -2344,10 +2892,14 @@ def claim_next_bridge_command(
             ).fetchone()
 
             if not row:
+
                 connection.commit()
+
                 return None
 
-            command_id = row["command_id"]
+            command_id = row[
+                "command_id"
+            ]
 
             connection.execute(
                 """
@@ -2369,15 +2921,30 @@ def claim_next_bridge_command(
 
             connection.commit()
 
-            result = dict(row)
-
-            result["status"] = "processing"
-            result["attempts"] = (
-                int(result.get("attempts") or 0) + 1
+            result = dict(
+                row
             )
 
-            result["payload_json"] = _json_loads(
-                result.get("payload_json"),
+            result[
+                "status"
+            ] = "processing"
+
+            result[
+                "attempts"
+            ] = (
+                int(
+                    result.get(
+                        "attempts"
+                    ) or 0
+                ) + 1
+            )
+
+            result[
+                "payload_json"
+            ] = _json_loads(
+                result.get(
+                    "payload_json"
+                ),
                 {}
             )
 
@@ -2438,6 +3005,11 @@ def complete_bridge_command(
 
             connection.rollback()
 
+            _log_db_error(
+                "complete_bridge_command",
+                e
+            )
+
             return False
 
         finally:
@@ -2458,7 +3030,9 @@ def fail_bridge_command(
 
             row = connection.execute(
                 """
-                SELECT attempts, max_attempts
+                SELECT
+                    attempts,
+                    max_attempts
                 FROM bridge_commands
                 WHERE command_id=?
                 """,
@@ -2466,6 +3040,7 @@ def fail_bridge_command(
             ).fetchone()
 
             if not row:
+
                 return False
 
             attempts = int(
@@ -2511,9 +3086,14 @@ def fail_bridge_command(
 
             return True
 
-        except Exception:
+        except Exception as e:
 
             connection.rollback()
+
+            _log_db_error(
+                "fail_bridge_command",
+                e
+            )
 
             return False
 
@@ -2530,11 +3110,16 @@ def save_bridge_result(
     session_id: Optional[str],
     action: str,
     success: bool,
-    result: Optional[Dict[str, Any]] = None,
+    result: Optional[
+        Dict[str, Any]
+    ] = None,
     error: Optional[str] = None
 ):
 
-    result_id = _new_id("result_")
+    result_id = _new_id(
+        "result_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -2637,10 +3222,16 @@ def get_bridge_result(
         if not row:
             return None
 
-        result = dict(row)
+        result = dict(
+            row
+        )
 
-        result["result_json"] = _json_loads(
-            result.get("result_json"),
+        result[
+            "result_json"
+        ] = _json_loads(
+            result.get(
+                "result_json"
+            ),
             {}
         )
 
@@ -2659,7 +3250,9 @@ def register_extension(
     extension_name: str = "",
     extension_version: str = "",
     browser: str = "Kiwi",
-    capabilities: Optional[List[str]] = None
+    capabilities: Optional[
+        List[str]
+    ] = None
 ):
 
     now = _utc_now()
@@ -2754,9 +3347,14 @@ def heartbeat_extension(
 
             return True
 
-        except Exception:
+        except Exception as e:
 
             connection.rollback()
+
+            _log_db_error(
+                "heartbeat_extension",
+                e
+            )
 
             return False
 
@@ -2792,9 +3390,14 @@ def disconnect_extension(
 
             return True
 
-        except Exception:
+        except Exception as e:
 
             connection.rollback()
+
+            _log_db_error(
+                "disconnect_extension",
+                e
+            )
 
             return False
 
@@ -2820,10 +3423,16 @@ def get_latest_extension():
         if not row:
             return None
 
-        result = dict(row)
+        result = dict(
+            row
+        )
 
-        result["capabilities_json"] = _json_loads(
-            result.get("capabilities_json"),
+        result[
+            "capabilities_json"
+        ] = _json_loads(
+            result.get(
+                "capabilities_json"
+            ),
             []
         )
 
@@ -2865,6 +3474,7 @@ def extension_is_online(
             connection.close()
 
     else:
+
         extension = get_latest_extension()
 
     if not extension:
@@ -2884,6 +3494,7 @@ def extension_is_online(
         )
 
         if last_seen.tzinfo is None:
+
             last_seen = last_seen.replace(
                 tzinfo=timezone.utc
             )
@@ -2918,8 +3529,10 @@ def get_resume_snapshot(
     if not session:
         return None
 
-    checkpoint = get_latest_automation_checkpoint(
-        session_id
+    checkpoint = (
+        get_latest_automation_checkpoint(
+            session_id
+        )
     )
 
     steps = get_automation_steps(
@@ -2928,8 +3541,13 @@ def get_resume_snapshot(
 
     return {
         "session": session,
-        "checkpoint": checkpoint,
-        "steps": steps,
+
+        "checkpoint":
+            checkpoint,
+
+        "steps":
+            steps,
+
         "resume_step": (
             checkpoint["current_step"]
             if checkpoint
@@ -2976,31 +3594,44 @@ def database_health():
 
         return {
             "ok": True,
-            "database": DB_PATH,
+
+            "database":
+                DB_PATH,
+
             "schema_version": (
                 version_row["value"]
                 if version_row
                 else None
             ),
+
             "tables": [
                 row["name"]
                 for row in tables
             ],
-            "timestamp": _utc_now()
+
+            "timestamp":
+                _utc_now()
         }
 
     except Exception as e:
 
         return {
             "ok": False,
-            "database": DB_PATH,
-            "error": str(e),
-            "timestamp": _utc_now()
+
+            "database":
+                DB_PATH,
+
+            "error":
+                str(e),
+
+            "timestamp":
+                _utc_now()
         }
 
     finally:
 
         if connection:
+
             connection.close()
 
 
@@ -3014,13 +3645,18 @@ def create_automation_task(
     title: str = "",
     user_command: str = "",
     total_steps: int = 0,
-    plan: Optional[Dict[str, Any]] = None,
+    plan: Optional[
+        Dict[str, Any]
+    ] = None,
     max_retries: int = 3,
     extension_id: Optional[str] = None,
     browser_name: str = "Kiwi"
 ):
 
-    task_id = _new_id("task_")
+    task_id = _new_id(
+        "task_"
+    )
+
     now = _utc_now()
 
     with _db_lock:
@@ -3121,7 +3757,9 @@ def get_automation_task(
         if not row:
             return None
 
-        result = dict(row)
+        result = dict(
+            row
+        )
 
         for field in [
             "plan_json",
@@ -3129,8 +3767,11 @@ def get_automation_task(
             "pending_action_json",
             "last_result_json"
         ]:
+
             result[field] = _json_loads(
-                result.get(field),
+                result.get(
+                    field
+                ),
                 {}
             )
 
@@ -3146,29 +3787,38 @@ def update_automation_task(
 ):
 
     allowed = {
+
         "session_id",
         "campaign_id",
         "title",
         "user_command",
         "status",
+
         "current_step",
         "total_steps",
+
         "current_action",
         "current_url",
+
         "plan_json",
         "completed_steps_json",
         "pending_action_json",
         "last_result_json",
+
         "retry_count",
         "max_retries",
+
         "last_error",
+
         "started_at",
         "paused_at",
         "resumed_at",
         "completed_at",
         "stopped_at",
+
         "extension_id",
         "browser_name",
+
         "is_deleted"
     }
 
@@ -3185,14 +3835,19 @@ def update_automation_task(
             "pending_action_json",
             "last_result_json"
         }:
-            value = _json_dumps(value)
+
+            value = _json_dumps(
+                value
+            )
 
         updates[key] = value
 
     if not updates:
         return False
 
-    updates["updated_at"] = _utc_now()
+    updates[
+        "updated_at"
+    ] = _utc_now()
 
     set_clause = ", ".join(
         f"{key}=?"
@@ -3371,7 +4026,9 @@ def resume_automation_task(
 
 def complete_automation_task(
     task_id: str,
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[
+        Dict[str, Any]
+    ] = None
 ):
 
     return update_automation_task(
@@ -3417,7 +4074,9 @@ def increment_task_retry(
         return False
 
     retry_count = int(
-        task.get("retry_count") or 0
+        task.get(
+            "retry_count"
+        ) or 0
     ) + 1
 
     return update_automation_task(
@@ -3431,6 +4090,7 @@ def increment_task_retry(
 # ===============================================================
 
 # Initialize automatically when imported.
+
 init_db()
 
 
