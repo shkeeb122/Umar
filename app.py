@@ -2,39 +2,70 @@
 ===============================================================
  FILE: app.py
  ROLE: BOSS - API SERVER + AI ROUTER + AUTOMATION CONTROLLER
- VERSION: 10.0 ULTRA
+ VERSION: 10.1 ULTRA - AI SERVICE COMPATIBILITY FIX
 ===============================================================
 
 ARCHITECTURE
 ------------
+
 Vercel / Client
        ↓
      Flask
        ↓
-   ai_service.py
+   app.py
        ↓
-     main.py
+ process_request()
        ↓
- smart_hands.py
+ ai_service.py
        ↓
- Kiwi Browser Extension
+ detect_intent()
        ↓
- Website
+ generate_response()
        ↓
- Bridge Result
+ intent handler
        ↓
- Database / Checkpoint
+ ┌───────────────────────────────────────┐
+ │ Normal AI                             │
+ │ Web Search                            │
+ │ Website Open                          │
+ │ Page Scan                             │
+ │ Extract                               │
+ │ Find / Click / Type                   │
+ │ Wait / Scroll                         │
+ │ Security / Human Handoff             │
+ │ Multi-Step Browser Plan               │
+ │ Smart Task                            │
+ │ Status / Stop                         │
+ └───────────────────────────────────────┘
        ↓
- Observe → Verify → Continue
+ Kiwi Extension Bridge
+       ↓
+ background.js
+       ↓
+ content.js
+       ↓
+ Real Website
+       ↓
+ Result
+       ↓
+ ai_service.py
+       ↓
+ app.py
+       ↓
+ Vercel / Client
 
 IMPORTANT
 ---------
 - db.py is the SINGLE database/schema owner.
-- This file does NOT create automation tables.
-- Existing chat/campaign/blog APIs are preserved.
-- Browser bridge uses persistent DB queues.
+- This file does NOT create database tables.
+- Existing campaign APIs are preserved.
+- Existing blog APIs are preserved.
+- Existing automation APIs are preserved.
+- Existing Kiwi bridge APIs are preserved.
 - CAPTCHA / OTP / payment/security challenges are never bypassed.
-- Browser close/reopen is supported through persistent session state.
+- AI routing is delegated to ai_service.process_request().
+- app.py does NOT directly call generate_response() with an
+  incomplete argument list.
 ===============================================================
 """
 
@@ -48,26 +79,64 @@ import json
 import re
 import traceback
 import threading
+
 from datetime import datetime, timezone
+
+
+# ===============================================================
+# 1. CONFIG
+# ===============================================================
 
 from config import BACKEND_URL
 
+
+# ===============================================================
+# 2. DATABASE
+# ===============================================================
+
 from db import *
+
+
+# ===============================================================
+# 3. HELPERS
+# ===============================================================
 
 from helpers import *
 
+
+# ===============================================================
+# 4. AI SERVICE
+#
+# IMPORTANT:
+# process_request() is the MASTER ENTRY POINT.
+#
+# Do NOT directly call:
+#
+#     generate_response(message)
+#
+# because generate_response() requires:
+#
+#     intent
+#     message
+#     history
+#     all_history
+#     campaign_id
+#
+# process_request() handles this architecture correctly.
+# ===============================================================
+
 from ai_service import (
-    detect_intent,
-    generate_response,
+    process_request,
     ai_chat
 )
 
 
 # ===============================================================
-# 1. FLASK APP
+# 5. FLASK APP
 # ===============================================================
 
 app = Flask(__name__)
+
 
 CORS(
     app,
@@ -78,17 +147,19 @@ CORS(
     }
 )
 
+
 START_TIME = time.time()
 
 
 # ===============================================================
-# 2. CONFIGURATION
+# 6. CONFIGURATION
 # ===============================================================
 
 EXTENSION_TEST_TOKEN = os.environ.get(
     "EXTENSION_TEST_TOKEN",
     ""
 ).strip()
+
 
 EXTENSION_COMMAND_TIMEOUT = int(
     os.environ.get(
@@ -97,12 +168,14 @@ EXTENSION_COMMAND_TIMEOUT = int(
     )
 )
 
+
 EXTENSION_MAX_RETRIES = int(
     os.environ.get(
         "EXTENSION_MAX_RETRIES",
         "3"
     )
 )
+
 
 EXTENSION_HEARTBEAT_TIMEOUT = int(
     os.environ.get(
@@ -111,6 +184,7 @@ EXTENSION_HEARTBEAT_TIMEOUT = int(
     )
 )
 
+
 BACKEND = os.environ.get(
     "BACKEND_URL",
     BACKEND_URL
@@ -118,7 +192,7 @@ BACKEND = os.environ.get(
 
 
 # ===============================================================
-# 3. ORCHESTRATOR STATE
+# 7. ORCHESTRATOR STATE
 # ===============================================================
 
 _orchestrator = None
@@ -131,23 +205,34 @@ _orchestrator_lock = threading.RLock()
 
 
 # ===============================================================
-# 4. BASIC HELPERS
+# 8. BASIC HELPERS
 # ===============================================================
 
 def now_iso():
+    """
+    Return current UTC timestamp.
+    """
+
     return datetime.now(
         timezone.utc
     ).isoformat()
 
 
 def json_dumps_safe(value):
+    """
+    Safely convert Python value to JSON string.
+    """
+
     try:
+
         return json.dumps(
             value,
             ensure_ascii=False,
             default=str
         )
+
     except Exception:
+
         return "{}"
 
 
@@ -155,23 +240,39 @@ def json_loads_safe(
     value,
     default=None
 ):
+    """
+    Safely convert JSON string to Python object.
+    """
 
     if value is None:
+
         return default
+
 
     if isinstance(
         value,
         (dict, list)
     ):
+
         return value
 
+
     try:
-        return json.loads(value)
+
+        return json.loads(
+            value
+        )
+
     except Exception:
+
         return default
 
 
 def make_id(prefix=""):
+    """
+    Generate UUID.
+    """
+
     return (
         f"{prefix}{uuid.uuid4()}"
         if prefix
@@ -184,42 +285,233 @@ def error_response(
     status=400,
     **extra
 ):
+    """
+    Standard error response.
+    """
 
     data = {
         "success": False,
-        "error": message
+        "error": str(message)
     }
 
-    data.update(extra)
+    data.update(
+        extra
+    )
 
-    return jsonify(data), status
+    return jsonify(
+        data
+    ), status
 
 
 def success_response(
     data=None,
     status=200
 ):
+    """
+    Standard success response.
+    """
 
     payload = {
         "success": True
     }
 
-    if isinstance(data, dict):
-        payload.update(data)
+    if isinstance(
+        data,
+        dict
+    ):
+
+        payload.update(
+            data
+        )
+
     elif data is not None:
+
         payload["data"] = data
 
-    return jsonify(payload), status
+
+    return jsonify(
+        payload
+    ), status
 
 
 # ===============================================================
-# 5. AUTH HELPERS
+# 9. AI HISTORY HELPERS
+# ===============================================================
+
+def get_ai_history(
+    campaign_id,
+    recent_limit=20,
+    all_limit=1000
+):
+    """
+    Get conversation history for AI.
+
+    DB compatibility functions are provided by db.py:
+
+        get_recent_history()
+        get_all_history()
+
+    If campaign_id is missing, empty history is returned.
+
+    This keeps /command usable even when the client does not
+    create a campaign first.
+    """
+
+    if not campaign_id:
+
+        return [], []
+
+
+    history = []
+
+    all_history = []
+
+
+    try:
+
+        history = get_recent_history(
+            campaign_id,
+            recent_limit
+        )
+
+    except Exception:
+
+        traceback.print_exc()
+
+
+    try:
+
+        all_history = get_all_history(
+            campaign_id,
+            all_limit
+        )
+
+    except Exception:
+
+        traceback.print_exc()
+
+
+    if not isinstance(
+        history,
+        list
+    ):
+
+        history = []
+
+
+    if not isinstance(
+        all_history,
+        list
+    ):
+
+        all_history = []
+
+
+    return history, all_history
+
+
+# ===============================================================
+# 10. MASTER AI REQUEST
+# ===============================================================
+
+def process_ai_request(
+    message,
+    campaign_id=None
+):
+    """
+    Central app.py → ai_service.py bridge.
+
+    Flow:
+
+        message
+           ↓
+        DB history
+           ↓
+        process_request()
+           ↓
+        detect_intent()
+           ↓
+        generate_response()
+           ↓
+        handler
+           ↓
+        result
+
+    Returns the complete AI result dictionary.
+    """
+
+    message = str(
+        message or ""
+    ).strip()
+
+
+    if not message:
+
+        return {
+            "success": False,
+            "intent": "chat",
+            "response":
+                "Please enter a message."
+        }
+
+
+    history, all_history = get_ai_history(
+        campaign_id
+    )
+
+
+    result = process_request(
+        message=message,
+        history=history,
+        all_history=all_history,
+        campaign_id=campaign_id
+    )
+
+
+    if not isinstance(
+        result,
+        dict
+    ):
+
+        return {
+            "success": True,
+            "intent": "chat",
+            "response": str(
+                result
+            ),
+            "timestamp": now_iso()
+        }
+
+
+    if "response" not in result:
+
+        result["response"] = ""
+
+
+    if "intent" not in result:
+
+        result["intent"] = "chat"
+
+
+    return result
+
+
+# ===============================================================
+# 11. AUTH HELPERS
 # ===============================================================
 
 def extension_authorized():
+    """
+    Check Kiwi extension bridge token.
+
+    If EXTENSION_TEST_TOKEN is empty, authentication remains
+    disabled for compatibility with existing development setup.
+    """
 
     if not EXTENSION_TEST_TOKEN:
+
         return True
+
 
     supplied = (
         request.headers.get(
@@ -228,7 +520,8 @@ def extension_authorized():
         ).strip()
     )
 
-    return (
+
+    return bool(
         supplied
         and supplied == EXTENSION_TEST_TOKEN
     )
@@ -237,6 +530,7 @@ def extension_authorized():
 def require_extension_auth():
 
     if not extension_authorized():
+
         return error_response(
             "Unauthorized extension request",
             401
@@ -257,7 +551,7 @@ def get_extension_id():
 
 
 # ===============================================================
-# 6. DATABASE HEALTH
+# 12. SYSTEM
 # ===============================================================
 
 @app.route(
@@ -267,12 +561,32 @@ def get_extension_id():
 def home():
 
     return jsonify({
+
         "success": True,
-        "service": "AI Ultimate Pro",
-        "role": "BOSS API + Browser Automation Controller",
-        "version": "10.0-ULTRA",
-        "backend": BACKEND,
-        "time": now_iso()
+
+        "service":
+            "AI Ultimate Pro",
+
+        "role":
+            "BOSS API + Browser Automation Controller",
+
+        "version":
+            "10.1-ULTRA",
+
+        "backend":
+            BACKEND,
+
+        "ai_router":
+            "ai_service.process_request",
+
+        "database":
+            "db.py",
+
+        "browser_bridge":
+            "Kiwi Extension",
+
+        "time":
+            now_iso()
     })
 
 
@@ -286,20 +600,34 @@ def health():
 
         db_status = database_health()
 
+
         return jsonify({
+
             "success": True,
-            "status": "healthy",
-            "database": db_status,
-            "uptime_seconds": round(
-                time.time() - START_TIME,
-                2
-            ),
+
+            "status":
+                "healthy",
+
+            "database":
+                db_status,
+
+            "uptime_seconds":
+                round(
+                    time.time() - START_TIME,
+                    2
+                ),
+
             "orchestrator_running":
                 _orchestrator_running,
-            "timestamp": now_iso()
+
+            "timestamp":
+                now_iso()
         })
 
+
     except Exception as e:
+
+        traceback.print_exc()
 
         return error_response(
             str(e),
@@ -314,9 +642,15 @@ def health():
 def ping():
 
     return jsonify({
-        "success": True,
-        "message": "pong",
-        "timestamp": now_iso()
+
+        "success":
+            True,
+
+        "message":
+            "pong",
+
+        "timestamp":
+            now_iso()
     })
 
 
@@ -327,18 +661,26 @@ def ping():
 def keep_alive():
 
     return jsonify({
-        "success": True,
-        "alive": True,
-        "uptime_seconds": round(
-            time.time() - START_TIME,
-            2
-        ),
-        "timestamp": now_iso()
+
+        "success":
+            True,
+
+        "alive":
+            True,
+
+        "uptime_seconds":
+            round(
+                time.time() - START_TIME,
+                2
+            ),
+
+        "timestamp":
+            now_iso()
     })
 
 
 # ===============================================================
-# 7. CAMPAIGNS
+# 13. CAMPAIGNS
 # ===============================================================
 
 @app.route(
@@ -357,14 +699,22 @@ def campaigns():
             == "true"
         )
 
+
         return jsonify({
-            "success": True,
-            "campaigns": get_campaigns(
-                include_deleted
-            )
+
+            "success":
+                True,
+
+            "campaigns":
+                get_campaigns(
+                    include_deleted
+                )
         })
 
+
     except Exception as e:
+
+        traceback.print_exc()
 
         return error_response(
             str(e),
@@ -386,18 +736,28 @@ def campaign(
             campaign_id
         )
 
+
         if not data:
+
             return error_response(
                 "Campaign not found",
                 404
             )
 
+
         return jsonify({
-            "success": True,
-            "campaign": data
+
+            "success":
+                True,
+
+            "campaign":
+                data
         })
 
+
     except Exception as e:
+
+        traceback.print_exc()
 
         return error_response(
             str(e),
@@ -415,12 +775,14 @@ def campaign_create():
         silent=True
     ) or {}
 
+
     name = str(
         data.get(
             "name",
             ""
         )
     ).strip()
+
 
     description = str(
         data.get(
@@ -429,28 +791,50 @@ def campaign_create():
         )
     ).strip()
 
+
     if not name:
+
         return error_response(
             "Campaign name required"
         )
 
-    campaign_id = create_campaign(
-        name,
-        description
-    )
 
-    if not campaign_id:
+    try:
+
+        campaign_id = create_campaign(
+            name,
+            description
+        )
+
+
+        if not campaign_id:
+
+            return error_response(
+                "Could not create campaign",
+                500
+            )
+
+
+        return success_response({
+
+            "campaign_id":
+                campaign_id,
+
+            "campaign":
+                get_campaign(
+                    campaign_id
+                )
+        })
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
         return error_response(
-            "Could not create campaign",
+            str(e),
             500
         )
-
-    return success_response({
-        "campaign_id": campaign_id,
-        "campaign": get_campaign(
-            campaign_id
-        )
-    })
 
 
 @app.route(
@@ -465,6 +849,7 @@ def campaign_rename(
         silent=True
     ) or {}
 
+
     name = str(
         data.get(
             "name",
@@ -472,25 +857,44 @@ def campaign_rename(
         )
     ).strip()
 
+
     if not name:
+
         return error_response(
             "New campaign name required"
         )
 
-    if not rename_campaign(
-        campaign_id,
-        name
-    ):
+
+    try:
+
+        if not rename_campaign(
+            campaign_id,
+            name
+        ):
+
+            return error_response(
+                "Campaign rename failed",
+                500
+            )
+
+
+        return success_response({
+
+            "campaign":
+                get_campaign(
+                    campaign_id
+                )
+        })
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
         return error_response(
-            "Campaign rename failed",
+            str(e),
             500
         )
-
-    return success_response({
-        "campaign": get_campaign(
-            campaign_id
-        )
-    })
 
 
 @app.route(
@@ -501,15 +905,29 @@ def campaign_delete(
     campaign_id
 ):
 
-    if not delete_campaign(
-        campaign_id
-    ):
+    try:
+
+        if not delete_campaign(
+            campaign_id
+        ):
+
+            return error_response(
+                "Campaign delete failed",
+                500
+            )
+
+
+        return success_response()
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
         return error_response(
-            "Campaign delete failed",
+            str(e),
             500
         )
-
-    return success_response()
 
 
 @app.route(
@@ -520,19 +938,33 @@ def campaign_restore(
     campaign_id
 ):
 
-    if not restore_campaign(
-        campaign_id
-    ):
+    try:
+
+        if not restore_campaign(
+            campaign_id
+        ):
+
+            return error_response(
+                "Campaign restore failed",
+                500
+            )
+
+
+        return success_response()
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
         return error_response(
-            "Campaign restore failed",
+            str(e),
             500
         )
 
-    return success_response()
-
 
 # ===============================================================
-# 8. MESSAGE / COMMAND API
+# 14. MESSAGE / COMMAND API
 # ===============================================================
 
 def save_message_pair(
@@ -540,6 +972,14 @@ def save_message_pair(
     user_text,
     assistant_text
 ):
+    """
+    Save both sides of a conversation.
+    """
+
+    if not campaign_id:
+
+        return False
+
 
     try:
 
@@ -549,15 +989,20 @@ def save_message_pair(
             user_text
         )
 
+
         save_message(
             campaign_id,
             "assistant",
             assistant_text
         )
 
+
         return True
 
+
     except Exception:
+
+        traceback.print_exc()
 
         return False
 
@@ -572,6 +1017,7 @@ def command():
         silent=True
     ) or {}
 
+
     command_value = str(
         data.get(
             "command",
@@ -582,31 +1028,91 @@ def command():
         )
     ).strip()
 
+
     campaign_id = data.get(
         "campaign_id"
     )
 
+
+    if campaign_id is not None:
+
+        campaign_id = str(
+            campaign_id
+        ).strip() or None
+
+
     if not command_value:
+
         return error_response(
             "Command required"
         )
 
+
     try:
 
-        intent = detect_intent(
-            command_value
+        # -------------------------------------------------------
+        # MASTER AI FLOW
+        # -------------------------------------------------------
+
+        result = process_ai_request(
+            command_value,
+            campaign_id
         )
 
-        response = generate_response(
-            command_value
+
+        response_text = str(
+            result.get(
+                "response",
+                ""
+            )
         )
+
+
+        # -------------------------------------------------------
+        # Save conversation if campaign exists.
+        # -------------------------------------------------------
+
+        if campaign_id:
+
+            save_message_pair(
+                campaign_id,
+                command_value,
+                response_text
+            )
+
 
         return jsonify({
-            "success": True,
-            "command": command_value,
-            "intent": intent,
-            "response": response
+
+            "success":
+                bool(
+                    result.get(
+                        "success",
+                        True
+                    )
+                ),
+
+            "command":
+                command_value,
+
+            "campaign_id":
+                campaign_id,
+
+            "intent":
+                result.get(
+                    "intent",
+                    "chat"
+                ),
+
+            "response":
+                response_text,
+
+            "timestamp":
+                result.get(
+                    "timestamp",
+                    now_iso()
+                )
         })
+
 
     except Exception as e:
 
@@ -617,6 +1123,10 @@ def command():
             500
         )
 
+
+# ===============================================================
+# 15. CHAT API
+# ===============================================================
 
 @app.route(
     "/chat/<campaign_id>",
@@ -630,6 +1140,7 @@ def chat(
         silent=True
     ) or {}
 
+
     message = str(
         data.get(
             "message",
@@ -640,15 +1151,38 @@ def chat(
         )
     ).strip()
 
+
     if not message:
+
         return error_response(
             "Message required"
         )
 
+
     try:
 
         # -------------------------------------------------------
-        # Save user message first.
+        # Verify campaign exists when possible.
+        # -------------------------------------------------------
+
+        campaign_data = get_campaign(
+            campaign_id
+        )
+
+
+        if not campaign_data:
+
+            return error_response(
+                "Campaign not found",
+                404
+            )
+
+
+        # -------------------------------------------------------
+        # IMPORTANT:
+        #
+        # Save the USER message before creating the next
+        # history snapshot.
         # -------------------------------------------------------
 
         save_message(
@@ -657,37 +1191,67 @@ def chat(
             message
         )
 
+
         # -------------------------------------------------------
-        # Existing AI service remains the brain.
+        # Master AI request.
+        #
+        # process_request() receives history from DB.
         # -------------------------------------------------------
 
-        intent = detect_intent(
-            message
+        result = process_ai_request(
+            message,
+            campaign_id
         )
 
-        response = generate_response(
-            message
+
+        response_text = str(
+            result.get(
+                "response",
+                ""
+            )
         )
 
-        if response is None:
-            response = ""
 
-        response = str(
-            response
-        )
+        # -------------------------------------------------------
+        # Save assistant response.
+        # -------------------------------------------------------
 
         save_message(
             campaign_id,
             "assistant",
-            response
+            response_text
         )
 
+
         return jsonify({
-            "success": True,
-            "campaign_id": campaign_id,
-            "intent": intent,
-            "response": response
+
+            "success":
+                bool(
+                    result.get(
+                        "success",
+                        True
+                    )
+                ),
+
+            "campaign_id":
+                campaign_id,
+
+            "intent":
+                result.get(
+                    "intent",
+                    "chat"
+                ),
+
+            "response":
+                response_text,
+
+            "timestamp":
+                result.get(
+                    "timestamp",
+                    now_iso()
+                )
         })
+
 
     except Exception as e:
 
@@ -700,111 +1264,7 @@ def chat(
 
 
 # ===============================================================
-# 9. BLOG
-# ===============================================================
-
-@app.route(
-    "/blog/<slug>",
-    methods=["GET"]
-)
-def blog(
-    slug
-):
-
-    post = get_blog(
-        slug
-    )
-
-    if not post:
-        return error_response(
-            "Blog not found",
-            404
-        )
-
-    return jsonify({
-        "success": True,
-        "blog": post
-    })
-
-
-@app.route(
-    "/blog/publish",
-    methods=["POST"]
-)
-def blog_publish():
-
-    data = request.get_json(
-        silent=True
-    ) or {}
-
-    slug = str(
-        data.get(
-            "slug",
-            ""
-        )
-    ).strip()
-
-    title = str(
-        data.get(
-            "title",
-            ""
-        )
-    ).strip()
-
-    content = str(
-        data.get(
-            "content",
-            ""
-        )
-    )
-
-    status = str(
-        data.get(
-            "status",
-            "published"
-        )
-    )
-
-    if not slug or not title:
-        return error_response(
-            "slug and title are required"
-        )
-
-    post_id = save_blog(
-        slug,
-        title,
-        content,
-        status
-    )
-
-    if not post_id:
-        return error_response(
-            "Could not publish blog",
-            500
-        )
-
-    return success_response({
-        "post_id": post_id,
-        "blog": get_blog(
-            slug
-        )
-    })
-
-
-@app.route(
-    "/blogs",
-    methods=["GET"]
-)
-def blogs():
-
-    return jsonify({
-        "success": True,
-        "blogs": get_blogs()
-    })
-
-
-# ===============================================================
-# 10. IMAGE CHAT
+# 16. IMAGE CHAT
 # ===============================================================
 
 @app.route(
@@ -817,6 +1277,7 @@ def chat_image():
         silent=True
     ) or {}
 
+
     message = str(
         data.get(
             "message",
@@ -824,18 +1285,86 @@ def chat_image():
         )
     ).strip()
 
-    try:
 
-        response = generate_response(
-            message
+    campaign_id = data.get(
+        "campaign_id"
+    )
+
+
+    if campaign_id is not None:
+
+        campaign_id = str(
+            campaign_id
+        ).strip() or None
+
+
+    if not message:
+
+        return error_response(
+            "Message required"
         )
 
+
+    try:
+
+        # Keep the image endpoint compatible with the same
+        # master AI architecture.
+        result = process_ai_request(
+            message,
+            campaign_id
+        )
+
+
+        response_text = str(
+            result.get(
+                "response",
+                ""
+            )
+        )
+
+
+        if campaign_id:
+
+            save_message_pair(
+                campaign_id,
+                message,
+                response_text
+            )
+
+
         return jsonify({
-            "success": True,
-            "response": response
+
+            "success":
+                bool(
+                    result.get(
+                        "success",
+                        True
+                    )
+                ),
+
+            "campaign_id":
+                campaign_id,
+
+            "intent":
+                result.get(
+                    "intent",
+                    "chat"
+                ),
+
+            "response":
+                response_text,
+
+            "timestamp":
+                result.get(
+                    "timestamp",
+                    now_iso()
+                )
         })
 
+
     except Exception as e:
+
+        traceback.print_exc()
 
         return error_response(
             str(e),
@@ -844,12 +1373,178 @@ def chat_image():
 
 
 # ===============================================================
-# 11. ORCHESTRATOR
+# 17. BLOG
+# ===============================================================
+
+@app.route(
+    "/blog/<slug>",
+    methods=["GET"]
+)
+def blog(
+    slug
+):
+
+    try:
+
+        post = get_blog(
+            slug
+        )
+
+
+        if not post:
+
+            return error_response(
+                "Blog not found",
+                404
+            )
+
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "blog":
+                post
+        })
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
+        return error_response(
+            str(e),
+            500
+        )
+
+
+@app.route(
+    "/blog/publish",
+    methods=["POST"]
+)
+def blog_publish():
+
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+
+    slug = str(
+        data.get(
+            "slug",
+            ""
+        )
+    ).strip()
+
+
+    title = str(
+        data.get(
+            "title",
+            ""
+        )
+    ).strip()
+
+
+    content = str(
+        data.get(
+            "content",
+            ""
+        )
+    )
+
+
+    status = str(
+        data.get(
+            "status",
+            "published"
+        )
+    )
+
+
+    if not slug or not title:
+
+        return error_response(
+            "slug and title are required"
+        )
+
+
+    try:
+
+        post_id = save_blog(
+            slug,
+            title,
+            content,
+            status
+        )
+
+
+        if not post_id:
+
+            return error_response(
+                "Could not publish blog",
+                500
+            )
+
+
+        return success_response({
+
+            "post_id":
+                post_id,
+
+            "blog":
+                get_blog(
+                    slug
+                )
+        })
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
+        return error_response(
+            str(e),
+            500
+        )
+
+
+@app.route(
+    "/blogs",
+    methods=["GET"]
+)
+def blogs():
+
+    try:
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "blogs":
+                get_blogs()
+        })
+
+
+    except Exception as e:
+
+        traceback.print_exc()
+
+        return error_response(
+            str(e),
+            500
+        )
+
+
+# ===============================================================
+# 18. ORCHESTRATOR
 # ===============================================================
 
 def get_orchestrator():
 
     global _orchestrator
+
 
     with _orchestrator_lock:
 
@@ -858,6 +1553,7 @@ def get_orchestrator():
             from main import SmartMain
 
             _orchestrator = SmartMain()
+
 
         return _orchestrator
 
@@ -868,12 +1564,14 @@ def _orchestrator_worker(
 
     global _orchestrator_running
 
+
     try:
 
         orchestrator = get_orchestrator()
 
+
         # -------------------------------------------------------
-        # Try common method names without breaking existing main.
+        # Preserve existing SmartMain compatibility.
         # -------------------------------------------------------
 
         if hasattr(
@@ -885,6 +1583,7 @@ def _orchestrator_worker(
                 command_value
             )
 
+
         elif hasattr(
             orchestrator,
             "start"
@@ -893,6 +1592,7 @@ def _orchestrator_worker(
             orchestrator.start(
                 command_value
             )
+
 
         elif hasattr(
             orchestrator,
@@ -903,6 +1603,7 @@ def _orchestrator_worker(
                 command_value
             )
 
+
         else:
 
             print(
@@ -910,13 +1611,16 @@ def _orchestrator_worker(
                 "run/start/execute method."
             )
 
+
     except Exception:
 
         traceback.print_exc()
 
+
     finally:
 
         with _orchestrator_lock:
+
             _orchestrator_running = False
 
 
@@ -927,12 +1631,16 @@ def run_orchestrator_async(
     global _orchestrator_thread
     global _orchestrator_running
 
+
     with _orchestrator_lock:
 
         if _orchestrator_running:
+
             return False
 
+
         _orchestrator_running = True
+
 
         _orchestrator_thread = threading.Thread(
             target=_orchestrator_worker,
@@ -940,13 +1648,15 @@ def run_orchestrator_async(
             daemon=True
         )
 
+
         _orchestrator_thread.start()
+
 
         return True
 
 
 # ===============================================================
-# 12. BASIC AUTOMATION API
+# 19. AUTOMATION API
 # ===============================================================
 
 @app.route(
@@ -959,6 +1669,7 @@ def automation_start():
         silent=True
     ) or {}
 
+
     command_value = str(
         data.get(
             "command",
@@ -969,30 +1680,45 @@ def automation_start():
         )
     ).strip()
 
+
     if not command_value:
 
         command_value = (
             "RapidWorker pe jao, task karo"
         )
 
+
     started = run_orchestrator_async(
         command_value
     )
 
+
     if not started:
 
         return jsonify({
-            "success": False,
+
+            "success":
+                False,
+
             "message":
                 "Automation already running",
-            "running": True
+
+            "running":
+                True
+
         }), 409
 
+
     return success_response({
+
         "message":
             "Automation started",
-        "command": command_value,
-        "running": True
+
+        "command":
+            command_value,
+
+        "running":
+            True
     })
 
 
@@ -1004,26 +1730,36 @@ def automation_stop():
 
     global _orchestrator_running
 
+
     try:
 
         with _orchestrator_lock:
+
             _orchestrator_running = False
 
-        orchestrator = get_orchestrator()
 
-        if hasattr(
-            orchestrator,
-            "stop"
-        ):
+        if _orchestrator is not None:
 
-            orchestrator.stop()
+            orchestrator = _orchestrator
+
+            if hasattr(
+                orchestrator,
+                "stop"
+            ):
+
+                orchestrator.stop()
+
 
         return success_response({
+
             "message":
                 "Automation stop requested"
         })
 
+
     except Exception as e:
+
+        traceback.print_exc()
 
         return error_response(
             str(e),
@@ -1039,35 +1775,54 @@ def automation_status():
 
     try:
 
-        orchestrator = get_orchestrator()
-
         status = {}
 
-        if hasattr(
-            orchestrator,
-            "get_status"
-        ):
 
-            status = (
-                orchestrator.get_status()
-                or {}
-            )
+        if _orchestrator is not None:
+
+            orchestrator = _orchestrator
+
+            if hasattr(
+                orchestrator,
+                "get_status"
+            ):
+
+                status = (
+                    orchestrator.get_status()
+                    or {}
+                )
+
 
         return jsonify({
-            "success": True,
+
+            "success":
+                True,
+
             "running":
                 _orchestrator_running,
-            "status": status
+
+            "status":
+                status
         })
+
 
     except Exception as e:
 
+        traceback.print_exc()
+
         return jsonify({
-            "success": True,
+
+            "success":
+                True,
+
             "running":
                 _orchestrator_running,
-            "status": {},
-            "error": str(e)
+
+            "status":
+                {},
+
+            "error":
+                str(e)
         })
 
 
@@ -1081,6 +1836,7 @@ def automation_command():
         silent=True
     ) or {}
 
+
     action = str(
         data.get(
             "action",
@@ -1088,17 +1844,21 @@ def automation_command():
         )
     ).strip().lower()
 
+
     if action == "start":
 
         return automation_start()
+
 
     if action == "stop":
 
         return automation_stop()
 
+
     if action == "status":
 
         return automation_status()
+
 
     return error_response(
         "Unknown automation action. "
@@ -1107,7 +1867,7 @@ def automation_command():
 
 
 # ===============================================================
-# 13. TASK COMPATIBILITY API
+# 20. TASK COMPATIBILITY API
 # ===============================================================
 
 @app.route(
@@ -1138,28 +1898,47 @@ def task_status():
 
 
 # ===============================================================
-# 14. BRIDGE ACTIONS
+# 21. BRIDGE ACTIONS
 # ===============================================================
 
 SUPPORTED_BRIDGE_ACTIONS = [
+
     "open",
+
     "search",
+
     "scan",
+
     "detect",
+
     "find",
+
     "find_element",
+
     "click",
+
     "click_by_text",
+
     "type",
+
     "extract",
+
     "extract_text",
+
     "page_info",
+
     "wait_text",
+
     "wait_for_text",
+
     "wait_selector",
+
     "wait_for_selector",
+
     "screenshot",
+
     "status",
+
     "stop"
 ]
 
@@ -1181,6 +1960,7 @@ def normalize_search_query(
         value or ""
     ).strip()
 
+
     return re.sub(
         r"\s+",
         " ",
@@ -1196,8 +1976,11 @@ def validate_url(
         url or ""
     ).strip()
 
+
     if not url:
+
         return False
+
 
     return bool(
         re.match(
@@ -1217,6 +2000,7 @@ def normalize_bridge_payload(
         payload or {}
     )
 
+
     if action == "search":
 
         query = normalize_search_query(
@@ -1229,12 +2013,16 @@ def normalize_bridge_payload(
             )
         )
 
+
         payload["query"] = query
 
+
         if not query:
+
             raise ValueError(
                 "Search query required"
             )
+
 
     if action == "open":
 
@@ -1245,26 +2033,30 @@ def normalize_bridge_payload(
             )
         ).strip()
 
+
         if not validate_url(
             url
         ):
+
             raise ValueError(
                 "Valid http/https URL required"
             )
 
+
         payload["url"] = url
 
-    if action in {
-        "type"
-    }:
+
+    if action == "type":
 
         if (
             "text" not in payload
             and "value" not in payload
         ):
+
             raise ValueError(
                 "Text/value required"
             )
+
 
     if action in {
         "click",
@@ -1287,11 +2079,12 @@ def normalize_bridge_payload(
                 "Target/text/selector required"
             )
 
+
     return payload
 
 
 # ===============================================================
-# 15. EXTENSION TEST PING
+# 22. EXTENSION PING
 # ===============================================================
 
 @app.route(
@@ -1301,17 +2094,26 @@ def normalize_bridge_payload(
 def extension_test_ping():
 
     return jsonify({
-        "success": True,
-        "bridge": "online",
-        "version": "10.0-ULTRA",
+
+        "success":
+            True,
+
+        "bridge":
+            "online",
+
+        "version":
+            "10.1-ULTRA",
+
         "supported_actions":
             SUPPORTED_BRIDGE_ACTIONS,
-        "timestamp": now_iso()
+
+        "timestamp":
+            now_iso()
     })
 
 
 # ===============================================================
-# 16. EXTENSION REGISTER
+# 23. EXTENSION REGISTER
 # ===============================================================
 
 @app.route(
@@ -1322,12 +2124,16 @@ def extension_test_register():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
+
 
     extension_id = str(
         data.get(
@@ -1336,11 +2142,13 @@ def extension_test_register():
         )
     ).strip()
 
+
     if not extension_id:
 
         extension_id = make_id(
             "ext_"
         )
+
 
     extension_name = str(
         data.get(
@@ -1349,12 +2157,14 @@ def extension_test_register():
         )
     )
 
+
     extension_version = str(
         data.get(
             "extension_version",
             ""
         )
     )
+
 
     browser = str(
         data.get(
@@ -1363,16 +2173,20 @@ def extension_test_register():
         )
     )
 
+
     capabilities = data.get(
         "capabilities",
         []
     )
 
+
     if not isinstance(
         capabilities,
         list
     ):
+
         capabilities = []
+
 
     register_extension(
         extension_id,
@@ -1382,17 +2196,25 @@ def extension_test_register():
         capabilities
     )
 
+
     return success_response({
+
         "extension_id":
             extension_id,
-        "registered": True,
-        "online": True,
-        "timestamp": now_iso()
+
+        "registered":
+            True,
+
+        "online":
+            True,
+
+        "timestamp":
+            now_iso()
     })
 
 
 # ===============================================================
-# 17. QUEUE BRIDGE COMMAND
+# 24. QUEUE BRIDGE COMMAND
 # ===============================================================
 
 @app.route(
@@ -1403,12 +2225,16 @@ def extension_test_command():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
+
 
     action = normalize_action(
         data.get(
@@ -1416,36 +2242,53 @@ def extension_test_command():
         )
     )
 
+
     if action not in SUPPORTED_BRIDGE_ACTIONS:
 
         return error_response(
+
             "Unsupported bridge action",
+
             400,
+
             supported_actions=
                 SUPPORTED_BRIDGE_ACTIONS
         )
+
 
     session_id = data.get(
         "session_id"
     )
 
+
     payload = data.get(
         "payload"
     )
 
+
     if payload is None:
 
         payload = {
+
             key: value
+
             for key, value in data.items()
+
             if key not in {
+
                 "action",
+
                 "session_id",
+
                 "priority",
+
                 "max_attempts",
+
                 "available_at"
+
             }
         }
+
 
     try:
 
@@ -1454,36 +2297,56 @@ def extension_test_command():
             payload
         )
 
+
     except ValueError as e:
 
         return error_response(
             str(e)
         )
 
-    priority = int(
-        data.get(
-            "priority",
-            0
-        )
-    )
 
-    max_attempts = int(
-        data.get(
-            "max_attempts",
-            EXTENSION_MAX_RETRIES
+    try:
+
+        priority = int(
+            data.get(
+                "priority",
+                0
+            )
         )
-    )
+
+
+        max_attempts = int(
+            data.get(
+                "max_attempts",
+                EXTENSION_MAX_RETRIES
+            )
+        )
+
+
+    except (TypeError, ValueError):
+
+        return error_response(
+            "priority and max_attempts must be integers"
+        )
+
 
     command_id = create_bridge_command(
+
         action=action,
+
         payload=payload,
+
         session_id=session_id,
+
         priority=priority,
+
         max_attempts=max_attempts,
+
         available_at=data.get(
             "available_at"
         )
     )
+
 
     if not command_id:
 
@@ -1492,17 +2355,28 @@ def extension_test_command():
             500
         )
 
+
     return success_response({
-        "command_id": command_id,
-        "session_id": session_id,
-        "action": action,
-        "status": "queued",
-        "payload": payload
+
+        "command_id":
+            command_id,
+
+        "session_id":
+            session_id,
+
+        "action":
+            action,
+
+        "status":
+            "queued",
+
+        "payload":
+            payload
     })
 
 
 # ===============================================================
-# 18. EXTENSION NEXT COMMAND
+# 25. EXTENSION NEXT COMMAND
 # ===============================================================
 
 @app.route(
@@ -1513,10 +2387,14 @@ def extension_test_next():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
 
+
     extension_id = get_extension_id()
+
 
     if extension_id:
 
@@ -1524,57 +2402,81 @@ def extension_test_next():
             extension_id
         )
 
+
     command = claim_next_bridge_command(
         extension_id
     )
 
+
     if not command:
 
         return jsonify({
-            "success": True,
-            "command": None,
-            "pending": False,
-            "timestamp": now_iso()
+
+            "success":
+                True,
+
+            "command":
+                None,
+
+            "pending":
+                False,
+
+            "timestamp":
+                now_iso()
         })
 
+
     return jsonify({
-        "success": True,
-        "pending": True,
+
+        "success":
+            True,
+
+        "pending":
+            True,
+
         "command": {
+
             "command_id":
                 command.get(
                     "command_id"
                 ),
+
             "session_id":
                 command.get(
                     "session_id"
                 ),
+
             "action":
                 command.get(
                     "action"
                 ),
+
             "payload":
                 command.get(
                     "payload_json",
                     {}
                 ),
+
             "attempts":
                 command.get(
                     "attempts",
                     1
                 ),
+
             "max_attempts":
                 command.get(
                     "max_attempts",
                     EXTENSION_MAX_RETRIES
                 )
         },
-        "timestamp": now_iso()
+
+        "timestamp":
+            now_iso()
     })
 
 
 # ===============================================================
-# 19. EXTENSION RESULT
+# 26. EXTENSION RESULT
 # ===============================================================
 
 @app.route(
@@ -1585,12 +2487,16 @@ def extension_test_result():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
+
 
     command_id = str(
         data.get(
@@ -1599,32 +2505,36 @@ def extension_test_result():
         )
     ).strip()
 
+
     if not command_id:
 
         return error_response(
             "command_id required"
         )
 
-    # -----------------------------------------------------------
-    # Get command.
-    # -----------------------------------------------------------
 
     connection = get_connection()
+
 
     try:
 
         row = connection.execute(
+
             """
             SELECT *
             FROM bridge_commands
             WHERE command_id=?
             """,
+
             (command_id,)
+
         ).fetchone()
+
 
     finally:
 
         connection.close()
+
 
     if not row:
 
@@ -1633,17 +2543,21 @@ def extension_test_result():
             404
         )
 
-    command = dict(
+
+    command_data = dict(
         row
     )
 
-    session_id = command.get(
+
+    session_id = command_data.get(
         "session_id"
     )
 
-    action = command.get(
+
+    action = command_data.get(
         "action"
     )
+
 
     success = bool(
         data.get(
@@ -1651,6 +2565,7 @@ def extension_test_result():
             False
         )
     )
+
 
     result_data = data.get(
         "result",
@@ -1660,18 +2575,27 @@ def extension_test_result():
         )
     )
 
+
     error_value = data.get(
         "error"
     )
 
+
     result_id = save_bridge_result(
+
         command_id=command_id,
+
         session_id=session_id,
+
         action=action,
+
         success=success,
+
         result=result_data,
+
         error=error_value
     )
+
 
     if not result_id:
 
@@ -1680,24 +2604,27 @@ def extension_test_result():
             500
         )
 
-    # -----------------------------------------------------------
-    # Update session automatically.
-    # -----------------------------------------------------------
 
     if session_id:
 
         try:
 
             update_automation_session(
+
                 session_id,
+
                 current_action=action,
+
                 current_url=str(
                     data.get(
                         "url",
                         ""
                     )
                 ),
-                last_result_json=result_data,
+
+                last_result_json=
+                    result_data,
+
                 last_error=(
                     error_value
                     if not success
@@ -1705,21 +2632,33 @@ def extension_test_result():
                 )
             )
 
+
         except Exception:
 
             traceback.print_exc()
 
+
     return success_response({
-        "result_id": result_id,
-        "command_id": command_id,
-        "session_id": session_id,
-        "action": action,
-        "success": success
+
+        "result_id":
+            result_id,
+
+        "command_id":
+            command_id,
+
+        "session_id":
+            session_id,
+
+        "action":
+            action,
+
+        "success":
+            success
     })
 
 
 # ===============================================================
-# 20. EXTENSION STATUS
+# 27. EXTENSION STATUS
 # ===============================================================
 
 @app.route(
@@ -1730,111 +2669,157 @@ def extension_test_status():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
 
+
     connection = get_connection()
+
 
     try:
 
         queued = connection.execute(
+
             """
             SELECT COUNT(*) AS count
             FROM bridge_commands
             WHERE status='queued'
             """
+
         ).fetchone()["count"]
 
+
         processing = connection.execute(
+
             """
             SELECT COUNT(*) AS count
             FROM bridge_commands
             WHERE status='processing'
             """
+
         ).fetchone()["count"]
 
+
         completed = connection.execute(
+
             """
             SELECT COUNT(*) AS count
             FROM bridge_commands
             WHERE status='completed'
             """
+
         ).fetchone()["count"]
 
+
         failed = connection.execute(
+
             """
             SELECT COUNT(*) AS count
             FROM bridge_commands
             WHERE status='failed'
             """
+
         ).fetchone()["count"]
 
+
         latest_command = connection.execute(
+
             """
             SELECT *
             FROM bridge_commands
             ORDER BY created_at DESC
             LIMIT 1
             """
+
         ).fetchone()
 
+
         latest_result = connection.execute(
+
             """
             SELECT *
             FROM bridge_results
             ORDER BY created_at DESC
             LIMIT 1
             """
+
         ).fetchone()
+
 
     finally:
 
         connection.close()
 
+
     extension = get_latest_extension()
 
+
     if latest_command:
+
         latest_command = dict(
             latest_command
         )
 
+
         latest_command[
             "payload_json"
         ] = json_loads_safe(
+
             latest_command.get(
                 "payload_json"
             ),
+
             {}
         )
 
+
     if latest_result:
+
         latest_result = dict(
             latest_result
         )
 
+
         latest_result[
             "result_json"
         ] = json_loads_safe(
+
             latest_result.get(
                 "result_json"
             ),
+
             {}
         )
 
+
     return jsonify({
-        "success": True,
+
+        "success":
+            True,
 
         "queue": {
-            "queued": queued,
-            "processing": processing,
-            "completed": completed,
-            "failed": failed
+
+            "queued":
+                queued,
+
+            "processing":
+                processing,
+
+            "completed":
+                completed,
+
+            "failed":
+                failed
         },
 
-        "extension": extension,
+        "extension":
+            extension,
 
         "extension_online":
             extension_is_online(
+
                 timeout_seconds=
                     EXTENSION_HEARTBEAT_TIMEOUT
             ),
@@ -1845,12 +2830,13 @@ def extension_test_status():
         "latest_result":
             latest_result,
 
-        "timestamp": now_iso()
+        "timestamp":
+            now_iso()
     })
 
 
 # ===============================================================
-# 21. COMMAND DETAILS
+# 28. COMMAND DETAILS
 # ===============================================================
 
 @app.route(
@@ -1863,21 +2849,29 @@ def extension_test_command_status(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
 
+
     connection = get_connection()
+
 
     try:
 
         command = connection.execute(
+
             """
             SELECT *
             FROM bridge_commands
             WHERE command_id=?
             """,
+
             (command_id,)
+
         ).fetchone()
+
 
         if not command:
 
@@ -1886,30 +2880,40 @@ def extension_test_command_status(
                 404
             )
 
+
         results = connection.execute(
+
             """
             SELECT *
             FROM bridge_results
             WHERE command_id=?
             ORDER BY created_at DESC
             """,
+
             (command_id,)
+
         ).fetchall()
+
 
         command_data = dict(
             command
         )
 
+
         command_data[
             "payload_json"
         ] = json_loads_safe(
+
             command_data.get(
                 "payload_json"
             ),
+
             {}
         )
 
+
         result_data = []
+
 
         for row in results:
 
@@ -1917,24 +2921,36 @@ def extension_test_command_status(
                 row
             )
 
+
             item[
                 "result_json"
             ] = json_loads_safe(
+
                 item.get(
                     "result_json"
                 ),
+
                 {}
             )
+
 
             result_data.append(
                 item
             )
 
+
         return jsonify({
-            "success": True,
-            "command": command_data,
-            "results": result_data
+
+            "success":
+                True,
+
+            "command":
+                command_data,
+
+            "results":
+                result_data
         })
+
 
     finally:
 
@@ -1942,7 +2958,7 @@ def extension_test_command_status(
 
 
 # ===============================================================
-# 22. AUTOMATION SESSION CREATE
+# 29. AUTOMATION SESSION CREATE
 # ===============================================================
 
 @app.route(
@@ -1953,12 +2969,16 @@ def automation_session_create():
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
+
 
     title = str(
         data.get(
@@ -1966,6 +2986,7 @@ def automation_session_create():
             ""
         )
     ).strip()
+
 
     user_command = str(
         data.get(
@@ -1977,10 +2998,12 @@ def automation_session_create():
         )
     ).strip()
 
+
     plan = data.get(
         "plan",
         {}
     )
+
 
     extension_id = str(
         data.get(
@@ -1990,6 +3013,7 @@ def automation_session_create():
         )
     ).strip() or None
 
+
     browser_name = str(
         data.get(
             "browser_name",
@@ -1997,21 +3021,36 @@ def automation_session_create():
         )
     )
 
-    max_retries = int(
-        data.get(
-            "max_retries",
-            EXTENSION_MAX_RETRIES
+
+    try:
+
+        max_retries = int(
+            data.get(
+                "max_retries",
+                EXTENSION_MAX_RETRIES
+            )
         )
-    )
+
+    except (TypeError, ValueError):
+
+        max_retries = EXTENSION_MAX_RETRIES
+
 
     session_id = create_automation_session(
+
         title=title,
+
         user_command=user_command,
+
         plan=plan,
+
         extension_id=extension_id,
+
         browser_name=browser_name,
+
         max_retries=max_retries
     )
+
 
     if not session_id:
 
@@ -2020,36 +3059,61 @@ def automation_session_create():
             500
         )
 
-    # Optional compatibility task.
-    task_id = create_automation_task(
-        session_id=session_id,
-        title=title,
-        user_command=user_command,
-        total_steps=len(
+
+    if isinstance(
+        plan,
+        list
+    ):
+
+        total_steps = len(
             plan
-            if isinstance(
-                plan,
-                list
-            )
-            else plan.get(
+        )
+
+    elif isinstance(
+        plan,
+        dict
+    ):
+
+        total_steps = len(
+            plan.get(
                 "steps",
                 []
             )
-            if isinstance(
-                plan,
-                dict
-            )
-            else []
-        ),
+        )
+
+    else:
+
+        total_steps = 0
+
+
+    task_id = create_automation_task(
+
+        session_id=session_id,
+
+        title=title,
+
+        user_command=user_command,
+
+        total_steps=total_steps,
+
         plan=plan,
+
         max_retries=max_retries,
+
         extension_id=extension_id,
+
         browser_name=browser_name
     )
 
+
     return success_response({
-        "session_id": session_id,
-        "task_id": task_id,
+
+        "session_id":
+            session_id,
+
+        "task_id":
+            task_id,
+
         "session":
             get_automation_session(
                 session_id
@@ -2058,7 +3122,7 @@ def automation_session_create():
 
 
 # ===============================================================
-# 23. GET AUTOMATION SESSION
+# 30. GET AUTOMATION SESSION
 # ===============================================================
 
 @app.route(
@@ -2071,12 +3135,16 @@ def automation_session_get(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     snapshot = get_resume_snapshot(
         session_id
     )
+
 
     if not snapshot:
 
@@ -2085,14 +3153,18 @@ def automation_session_get(
             404
         )
 
+
     return jsonify({
-        "success": True,
+
+        "success":
+            True,
+
         **snapshot
     })
 
 
 # ===============================================================
-# 24. PAUSE SESSION
+# 31. PAUSE SESSION
 # ===============================================================
 
 @app.route(
@@ -2105,12 +3177,16 @@ def automation_session_pause(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
+
 
     reason = str(
         data.get(
@@ -2119,10 +3195,15 @@ def automation_session_pause(
         )
     )
 
+
     if not update_automation_session(
+
         session_id,
+
         status="PAUSED",
+
         pause_reason=reason
+
     ):
 
         return error_response(
@@ -2130,20 +3211,29 @@ def automation_session_pause(
             500
         )
 
+
     add_automation_event(
+
         session_id,
+
         "PAUSED",
+
         reason
     )
 
+
     return success_response({
-        "session_id": session_id,
-        "status": "PAUSED"
+
+        "session_id":
+            session_id,
+
+        "status":
+            "PAUSED"
     })
 
 
 # ===============================================================
-# 25. RESUME SESSION
+# 32. RESUME SESSION
 # ===============================================================
 
 @app.route(
@@ -2156,12 +3246,16 @@ def automation_session_resume(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     session = get_automation_session(
         session_id
     )
+
 
     if not session:
 
@@ -2170,32 +3264,47 @@ def automation_session_resume(
             404
         )
 
+
     snapshot = get_resume_snapshot(
         session_id
     )
 
+
     update_automation_session(
+
         session_id,
+
         status="RESUMING",
+
         pause_reason=None
     )
 
+
     add_automation_event(
+
         session_id,
+
         "RESUME_REQUESTED",
+
         "Automation resume requested"
     )
 
+
     return success_response({
-        "session_id": session_id,
-        "status": "RESUMING",
+
+        "session_id":
+            session_id,
+
+        "status":
+            "RESUMING",
+
         "resume_snapshot":
             snapshot
     })
 
 
 # ===============================================================
-# 26. SAVE CHECKPOINT
+# 33. SAVE CHECKPOINT
 # ===============================================================
 
 @app.route(
@@ -2208,41 +3317,62 @@ def automation_session_checkpoint(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     data = request.get_json(
         silent=True
     ) or {}
 
-    checkpoint_id = save_automation_checkpoint(
-        session_id=session_id,
-        current_step=int(
+
+    try:
+
+        current_step = int(
             data.get(
                 "current_step",
                 0
             )
-        ),
+        )
+
+    except (TypeError, ValueError):
+
+        current_step = 0
+
+
+    checkpoint_id = save_automation_checkpoint(
+
+        session_id=session_id,
+
+        current_step=current_step,
+
         current_action=str(
             data.get(
                 "current_action",
                 ""
             )
         ),
+
         current_url=str(
             data.get(
                 "current_url",
                 ""
             )
         ),
+
         snapshot=data.get(
+
             "snapshot",
+
             data.get(
                 "state",
                 {}
             )
         )
     )
+
 
     if not checkpoint_id:
 
@@ -2251,26 +3381,34 @@ def automation_session_checkpoint(
             500
         )
 
+
     add_automation_event(
+
         session_id,
+
         "CHECKPOINT",
+
         "Checkpoint saved",
+
         {
             "checkpoint_id":
                 checkpoint_id
         }
     )
 
+
     return success_response({
+
         "checkpoint_id":
             checkpoint_id,
+
         "session_id":
             session_id
     })
 
 
 # ===============================================================
-# 27. RESUME SNAPSHOT
+# 34. RESUME SNAPSHOT
 # ===============================================================
 
 @app.route(
@@ -2283,12 +3421,16 @@ def automation_resume_snapshot(
 
     auth_error = require_extension_auth()
 
+
     if auth_error:
+
         return auth_error
+
 
     snapshot = get_resume_snapshot(
         session_id
     )
+
 
     if not snapshot:
 
@@ -2297,14 +3439,18 @@ def automation_resume_snapshot(
             404
         )
 
+
     return jsonify({
-        "success": True,
+
+        "success":
+            True,
+
         **snapshot
     })
 
 
 # ===============================================================
-# 28. DATABASE HEALTH API
+# 35. DATABASE HEALTH API
 # ===============================================================
 
 @app.route(
@@ -2313,13 +3459,24 @@ def automation_resume_snapshot(
 )
 def database_health_route():
 
-    return jsonify(
-        database_health()
-    )
+    try:
+
+        return jsonify(
+            database_health()
+        )
+
+    except Exception as e:
+
+        traceback.print_exc()
+
+        return error_response(
+            str(e),
+            500
+        )
 
 
 # ===============================================================
-# 29. GLOBAL ERROR HANDLER
+# 36. GLOBAL ERROR HANDLERS
 # ===============================================================
 
 @app.errorhandler(
@@ -2328,9 +3485,16 @@ def database_health_route():
 def not_found(error):
 
     return jsonify({
-        "success": False,
-        "error": "Route not found",
-        "path": request.path
+
+        "success":
+            False,
+
+        "error":
+            "Route not found",
+
+        "path":
+            request.path
+
     }), 404
 
 
@@ -2340,10 +3504,19 @@ def not_found(error):
 def method_not_allowed(error):
 
     return jsonify({
-        "success": False,
-        "error": "Method not allowed",
-        "method": request.method,
-        "path": request.path
+
+        "success":
+            False,
+
+        "error":
+            "Method not allowed",
+
+        "method":
+            request.method,
+
+        "path":
+            request.path
+
     }), 405
 
 
@@ -2354,80 +3527,137 @@ def internal_error(error):
 
     traceback.print_exc()
 
+
     return jsonify({
-        "success": False,
-        "error": "Internal server error"
+
+        "success":
+            False,
+
+        "error":
+            "Internal server error"
+
     }), 500
 
 
 # ===============================================================
-# 30. ROUTE MAP
+# 37. ROUTE MAP
 # ===============================================================
 
 ROUTE_MAP = {
 
     "system": [
+
         "/",
+
         "/health",
+
         "/ping",
+
         "/keep-alive",
+
         "/database/health"
+
     ],
+
 
     "campaign": [
+
         "/campaigns",
+
         "/campaign/<campaign_id>",
+
         "/campaign/create",
+
         "/campaign/rename/<campaign_id>",
+
         "/campaign/delete/<campaign_id>",
+
         "/campaign/restore/<campaign_id>"
+
     ],
+
 
     "chat": [
+
         "/command",
+
         "/chat/<campaign_id>",
+
         "/chat/image"
+
     ],
+
 
     "blog": [
+
         "/blog/<slug>",
+
         "/blog/publish",
+
         "/blogs"
+
     ],
+
 
     "automation": [
+
         "/automation/start",
+
         "/automation/stop",
+
         "/automation/status",
+
         "/automation/command",
+
         "/task/start",
+
         "/task/stop",
+
         "/task/status"
+
     ],
+
 
     "extension_bridge": [
+
         "/extension/test/ping",
+
         "/extension/test/register",
+
         "/extension/test/command",
+
         "/extension/test/next",
+
         "/extension/test/result",
+
         "/extension/test/status",
+
         "/extension/test/command/<command_id>"
+
     ],
 
+
     "sessions": [
+
         "/automation/session",
+
         "/automation/session/<session_id>",
+
         "/automation/session/<session_id>/pause",
+
         "/automation/session/<session_id>/resume",
+
         "/automation/session/<session_id>/checkpoint",
+
         "/automation/session/<session_id>/resume-snapshot"
+
     ]
+
 }
 
 
 # ===============================================================
-# 31. STARTUP INFO
+# 38. STARTUP INFO
 # ===============================================================
 
 print(
@@ -2435,11 +3665,15 @@ print(
 )
 
 print(
-    "🚀 AI ULTIMATE PRO - APP 10.0 ULTRA"
+    "🚀 AI ULTIMATE PRO - APP 10.1 ULTRA"
 )
 
 print(
     "🧠 AI Brain        : ai_service.py"
+)
+
+print(
+    "🎯 Master Router   : process_request()"
 )
 
 print(
@@ -2476,21 +3710,10 @@ print(
 
 
 # ===============================================================
-# 32. LOCAL START
+# 39. LOCAL START
 # ===============================================================
 
 if __name__ == "__main__":
-
-    # Render normally starts this application through
-    # its configured web-server command.
-    #
-    # For local testing:
-    #
-    #     python app.py
-    #
-    # Render production:
-    #
-    #     gunicorn app:app
 
     port = int(
         os.environ.get(
@@ -2499,9 +3722,13 @@ if __name__ == "__main__":
         )
     )
 
+
     app.run(
+
         host="0.0.0.0",
+
         port=port,
+
         debug=False
     )
 
